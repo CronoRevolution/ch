@@ -86,16 +86,36 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // --- Config Firebase (misma BD que el resto del sistema) ---
+// Configuración COMPLETA: la apiKey es imprescindible para que funcione la
+// autenticación anónima. Sin ella, signInAnonymously() falla y todas las
+// escrituras reciben PERMISSION_DENIED (las lecturas sí funcionan, porque
+// son públicas — de ahí que el reloj y la carrera sí llegaran).
 const firebaseConfig = {
+  apiKey: "AIzaSyDIpeH0Nj7aXEDcg5a4figmCYCvTL_hpfU",
+  authDomain: "enduro-revolution-live.firebaseapp.com",
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "enduro-revolution-live",
 };
-const APP_VER="2.3";   // súbelo en cada cambio para forzar refresco
+const APP_VER="2.4";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
+let autenticado=false;   // sesión anónima activa (necesaria para escribir)
+let errorAuth="";        // último error de autenticación
 try{
   firebase.initializeApp(firebaseConfig);
   db=firebase.database();
-  firebase.auth().signInAnonymously().catch(e=>console.warn("auth",e.message));
+  // Autenticación anónima: obligatoria para poder escribir. Reintenta si falla,
+  // y deja constancia del error para poder diagnosticarlo desde la propia app.
+  firebase.auth().onAuthStateChanged(u=>{ autenticado=!!u; render(); });
+  const intentarAuth=(n=0)=>{
+    firebase.auth().signInAnonymously().catch(e=>{
+      errorAuth=e.message||String(e);
+      console.warn("auth",errorAuth);
+      if(n<5) setTimeout(()=>intentarAuth(n+1), 3000*(n+1));
+      render();
+    });
+  };
+  intentarAuth();
   db.ref(".info/connected").on("value",s=>{ connected=!!s.val(); render(); });
 }catch(e){ console.warn("Firebase init", e); }
 
@@ -212,7 +232,7 @@ let syncing=false;
 function sincronizar(){
   // No exigimos `connected`: intentamos siempre. Si hay red, sube; si no, falla
   // y se reintenta luego. Evita bloquearse por un indicador con falsos negativos.
-  if(!db || syncing || !setup) return;
+  if(!db || syncing || !setup || !autenticado) return;
   const pend = queue.filter(f=>!f.synced && !f.anulado);
   if(!pend.length) return;
   syncing=true;
@@ -366,6 +386,11 @@ function pantallaFichar(){
         <div class="s">${clockBadge()}</div></div>
     </header>
     <main>
+      ${!autenticado ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
+             🔒 Sin sesión con el servidor — no se pueden subir fichajes<br>
+             <span style="font-weight:400;font-size:0.62rem">${errorAuth||"Conectando…"}</span><br>
+             <span style="font-weight:400;font-size:0.62rem">Lo fichado se conserva y se subirá al recuperar la sesión.</span>
+           </div>` : ''}
       ${ultimoError ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
              ⚠ No se pudieron subir los fichajes<br>
              <span style="font-weight:400;font-size:0.62rem;opacity:0.85">${ultimoError}</span><br>
