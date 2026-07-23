@@ -89,8 +89,9 @@
 const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
 };
-const APP_VER="2.0";   // súbelo en cada cambio para forzar refresco
+const APP_VER="2.1";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
+let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 try{
   firebase.initializeApp(firebaseConfig);
   db=firebase.database();
@@ -117,7 +118,15 @@ setInterval(probarConexion, 15000);
 //  - Firebase dice que está conectado
 //  - Una escritura funcionó hace menos de 45s
 function hayConexion(){
-  return connected || pruebaEscrituraOk || (Date.now()-ultimaSubidaOk < 45000);
+  // Cualquiera de estas señales prueba que hay conexión con Firebase:
+  //  - Firebase declara estar conectado
+  //  - Una escritura funcionó hace poco
+  //  - Recibimos datos de Firebase hace poco (reloj, carrera...)
+  const ahora=Date.now();
+  return connected
+      || pruebaEscrituraOk
+      || (ahora-ultimaSubidaOk  < 45000)
+      || (ahora-ultimaLecturaFB < 60000);
 }
 
 // --- Carrera activa: la lee del nodo live/ que publica el programa central ---
@@ -126,6 +135,7 @@ let carreraActiva=null;
 function escucharCarrera(){
   if(!db)return;
   db.ref("live/config").on("value",s=>{
+    ultimaLecturaFB=Date.now();   // dato recibido = hay conexión
     const c=s.val()||{};
     const nueva=c.name||null;
     if(nueva!==carreraActiva){ carreraActiva=nueva; render(); }
@@ -134,7 +144,18 @@ function escucharCarrera(){
 
 // --- Estado ---
 const LS_SETUP="ch_setup", LS_QUEUE="ch_queue";
-let setup = load(LS_SETUP) || null;   // { controlId, nombre, stage, lap, ctrl, comisario }
+let setup = (()=>{
+  const s = load(LS_SETUP);
+  if(!s) return null;
+  // La configuración caduca a las 10 horas: evita que al día siguiente (o en
+  // otra carrera) se abra con un CH antiguo y se fiche en el control equivocado.
+  const HORAS_VALIDEZ = 10;
+  if(s.guardadoEn && (Date.now()-s.guardadoEn) > HORAS_VALIDEZ*3600*1000){
+    return null;   // caducada: se pedirá de nuevo
+  }
+  return s;
+})();
+let confirmado = false;   // el comisario ha confirmado el control en esta sesión   // { controlId, nombre, stage, lap, ctrl, comisario }
 let queue = load(LS_QUEUE) || [];     // fichajes locales: { id, dorsal, horaMs, ts, synced }
 let clockOffset = 0;                  // ms a sumar al reloj local para obtener hora "oficial"
 let clockState = "pending";           // pending | ok | warn | bad
@@ -153,6 +174,8 @@ function initClockSync(){
   db.ref(".info/serverTimeOffset").on("value", snap=>{
     const off = snap.val();
     if(typeof off === "number"){
+      // Si Firebase nos manda el offset, es que hay conexión REAL.
+      ultimaLecturaFB=Date.now();
       clockOffset = off;
       const abs=Math.abs(off);
       clockState = abs<2000 ? "ok" : abs<10000 ? "warn" : "bad";
@@ -293,6 +316,39 @@ function clockBadge(){
   return `<span class="${cls}">${txt}${off}</span>`;
 }
 
+
+function pantallaConfirmar(){
+  const s=setup||{};
+  const pend=queue.filter(f=>!f.synced).length;
+  const hace=s.guardadoEn?Math.round((Date.now()-s.guardadoEn)/60000):null;
+  return `
+  <div class="wrap">
+    <header><div><div class="t">Confirma tu control</div><div class="sub">Antes de empezar a fichar</div></div></header>
+    <main class="setup">
+      <div class="card" style="border-color:var(--amber)">
+        <div style="text-align:center;padding:0.5rem 0">
+          <div style="font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:0.05em">CH${s.ctrl||"?"}</div>
+          <div style="font-size:1.05rem;font-weight:700;margin-top:0.2rem">${s.nombre||""}</div>
+          ${s.comisario?`<div class="mini" style="margin-top:0.3rem">Comisario: ${s.comisario}</div>`:""}
+          ${hace!=null?`<div class="mini">Configurado hace ${hace<60?hace+" min":Math.round(hace/60)+" h"}</div>`:""}
+        </div>
+      </div>
+      <div class="card">
+        <div class="mini" style="text-align:center;line-height:1.5">
+          Carrera activa:<br>
+          <b style="color:var(--cyan);font-size:0.85rem">${carreraActiva||"— ninguna —"}</b>
+        </div>
+        ${pend>0?`<div class="mini" style="text-align:center;color:var(--amber);margin-top:0.4rem">⏳ ${pend} fichaje(s) pendiente(s) de subir</div>`:""}
+      </div>
+      <button class="btnPasa" style="font-size:1.15rem;padding:1rem" onclick="confirmarControl()">
+        ✓ Sí, soy el CH${s.ctrl||"?"} — empezar
+      </button>
+      <button class="btnSec" style="width:100%" onclick="cambiarControl()">⚙ No, cambiar de control</button>
+      <div class="mini" style="text-align:center">Reloj: ${clockBadge()} · v${APP_VER}</div>
+    </main>
+  </div>`;
+}
+
 function pantallaFichar(){
   const pend = queue.filter(f=>!f.synced).length;
   const online = hayConexion();
@@ -351,7 +407,7 @@ function render(){
   const eraDorsal=activo&&activo.id==="dorsalIn";
   const valDorsal=eraDorsal?activo.value:null;
   const posCursor=eraDorsal?activo.selectionStart:null;
-  root.innerHTML = setup ? pantallaFichar() : pantallaSetup();
+  root.innerHTML = !setup ? pantallaSetup() : (confirmado ? pantallaFichar() : pantallaConfirmar());
   if(eraDorsal){
     const di=document.getElementById("dorsalIn");
     if(di){
@@ -378,8 +434,9 @@ window.guardarSetup=function(){
   if(!codigo){ alert("Introduce el código de acceso que te ha dado la organización."); return; }
   if(!ctrl){ alert("Indica el número de CH."); return; }
   const controlId=`ch${ctrl}`;
-  setup={ controlId, nombre:nombre||`CH${ctrl}`, ctrl, comisario, codigo };
+  setup={ controlId, nombre:nombre||`CH${ctrl}`, ctrl, comisario, codigo, guardadoEn:Date.now() };
   save(LS_SETUP, setup);
+  confirmado=true;
   pushPresencia();
   pedirWakeLock();
   render();
@@ -398,10 +455,16 @@ window.onPasaManual=function(){
   now.setHours(+m[1], +m[2], +m[3], 0);
   fichar(dorsalActual, now.getTime());
 };
+window.confirmarControl=function(){
+  confirmado=true;
+  pushPresencia();
+  pedirWakeLock();
+  render();
+};
 window.anular=anular;
 window.cambiarControl=function(){
   if(confirm("¿Cambiar la configuración del control? Tus fichajes locales se conservan.")){
-    setup=null; save(LS_SETUP,null); render();
+    setup=null; confirmado=false; save(LS_SETUP,null); render();
   }
 };
 
