@@ -89,7 +89,7 @@
 const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
 };
-const APP_VER="2.2";   // súbelo en cada cambio para forzar refresco
+const APP_VER="2.3";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 try{
@@ -161,7 +161,7 @@ let clockOffset = 0;                  // ms a sumar al reloj local para obtener 
 let clockState = "pending";           // pending | ok | warn | bad
 let dorsalActual = "";
 let promptInstalar = null;   // evento de instalación (Chrome/Android)
-let codigoRechazado = false; // el servidor rechazó el código de acceso
+let ultimoError = "";  // texto del último fallo de subida (para diagnóstico)
 
 function load(k){ try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;} }
 function save(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
@@ -226,14 +226,14 @@ function sincronizar(){
     }).then(()=>{ f.synced=true; });
   })).then(()=>{
     ultimaSubidaOk=Date.now();
-    codigoRechazado=false;
+    ultimoError="";
     save(LS_QUEUE, queue); syncing=false; render();
   }).catch(e=>{
-    // PERMISSION_DENIED = código incorrecto (las reglas lo rechazan)
-    if(String(e.message||"").toUpperCase().includes("PERMISSION")){
-      codigoRechazado=true;
-    }
-    console.warn("sync",e.message); syncing=false; render();
+    // Guardamos el error REAL para poder diagnosticar. Con el código en la ruta
+    // ya no existe "código incorrecto": un fallo aquí suele significar que las
+    // reglas de Firebase no están publicadas o rechazan algún campo.
+    ultimoError=String(e.message||e||"error desconocido");
+    console.warn("sync",ultimoError); syncing=false; render();
   });
 }
 // Reintento periódico de sincronización (por si vuelve la cobertura)
@@ -329,6 +329,7 @@ function pantallaConfirmar(){
           <div style="font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:0.05em">CH${s.ctrl||"?"}</div>
           <div style="font-size:1.05rem;font-weight:700;margin-top:0.2rem">${s.nombre||""}</div>
           ${s.comisario?`<div class="mini" style="margin-top:0.3rem">Comisario: ${s.comisario}</div>`:""}
+          <div class="mini" style="margin-top:0.3rem">Código: <b style="font-family:monospace;letter-spacing:0.1em;color:var(--cyan)">${s.codigo||"—"}</b></div>
           ${hace!=null?`<div class="mini">Configurado hace ${hace<60?hace+" min":Math.round(hace/60)+" h"}</div>`:""}
         </div>
       </div>
@@ -356,7 +357,7 @@ function pantallaFichar(){
     <header>
       <div style="min-width:0">
         <div class="t">${setup.nombre||'Control'}</div>
-        <div class="sub">CH${setup.ctrl||'?'}${setup.comisario?' · '+setup.comisario:''}</div>
+        <div class="sub">CH${setup.ctrl||'?'}${setup.comisario?' · '+setup.comisario:''} · cód ${setup.codigo||'—'}</div>
         <div class="sub" style="color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
           ${carreraActiva?('🏁 '+carreraActiva):'<span style="color:var(--amber)">⚠ sin carrera activa</span>'}
         </div>
@@ -365,9 +366,10 @@ function pantallaFichar(){
         <div class="s">${clockBadge()}</div></div>
     </header>
     <main>
-      ${codigoRechazado ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
-             ⛔ Código de acceso incorrecto — los fichajes NO se están subiendo.<br>
-             <span style="font-weight:400;font-size:0.66rem">Pulsa "⚙ Cambiar control" y corrige el código. Lo fichado se conserva.</span>
+      ${ultimoError ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
+             ⚠ No se pudieron subir los fichajes<br>
+             <span style="font-weight:400;font-size:0.62rem;opacity:0.85">${ultimoError}</span><br>
+             <span style="font-weight:400;font-size:0.62rem">Lo fichado se conserva y se reintenta solo.</span>
            </div>` : ''}
       ${!online ? `<div class="banner b-off">📴 Sin conexión — fichando en local (${pend} sin subir). Se sincronizará solo al recuperar señal.</div>`
                 : pend>0 ? `<div class="banner b-off">Subiendo ${pend} fichaje(s)…</div>`
