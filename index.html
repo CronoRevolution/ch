@@ -89,7 +89,7 @@
 const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
 };
-const APP_VER="2.1";   // súbelo en cada cambio para forzar refresco
+const APP_VER="2.2";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 try{
@@ -216,13 +216,12 @@ function sincronizar(){
   const pend = queue.filter(f=>!f.synced && !f.anulado);
   if(!pend.length) return;
   syncing=true;
-  const ref = db.ref("chFichajes/"+setup.controlId);
+  const ref = db.ref("chFichajes/"+encodeURIComponent(setup.codigo||"sincodigo")+"/"+setup.controlId);
   Promise.all(pend.map(f=>{
     return ref.push({
       dorsal:f.dorsal, horaMs:f.horaMs,
       ctrl:setup.ctrl||null,
       comisario:setup.comisario||null, anulado:false,
-      codigo:setup.codigo||"",
       ts: firebase.database.ServerValue.TIMESTAMP,
     }).then(()=>{ f.synced=true; });
   })).then(()=>{
@@ -246,7 +245,7 @@ function pushPresencia(){
   if(!db || !connected || !setup) return;
   const pend = queue.filter(f=>!f.synced).length;
   const ultimo = queue.length ? queue[0].horaMs : null;
-  db.ref("chPresencia/"+setup.controlId).set({
+  db.ref("chPresencia/"+encodeURIComponent(setup.codigo||"sincodigo")+"/"+setup.controlId).set({
     controlId:setup.controlId, nombre:setup.nombre||"",
     stage:setup.stage||null, ctrl:setup.ctrl||null, comisario:setup.comisario||null,
     lastSeen: firebase.database.ServerValue.TIMESTAMP,
