@@ -96,7 +96,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="2.5";   // súbelo en cada cambio para forzar refresco
+const APP_VER="2.6";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -312,19 +312,15 @@ function pantallaSetup(){
       <div class="card">
         <label>Código de acceso</label>
         <input id="s_codigo" type="text" inputmode="numeric" placeholder="El que te den hoy" value="${s.codigo||''}">
-        <div class="mini" style="margin-top:0.3rem">Te lo facilita la organización el día de la carrera. Sin él no se pueden enviar fichajes.</div>
+        <div class="mini" style="margin-top:0.3rem">Te lo facilita la organización el día de la carrera. Sin él, los fichajes no llegan al programa.</div>
       </div>
       <div class="card">
-        <div class="row">
-          <div style="flex:2"><label>Nombre del control</label>
-            <input id="s_nombre" placeholder="Ej: CH2 Bosque" value="${s.nombre||''}"></div>
-          <div style="flex:1"><label>CH nº</label>
-            <input id="s_ctrl" type="number" min="1" max="20" placeholder="1" value="${s.ctrl||''}"></div>
-        </div>
-        <div class="mini" style="margin-top:0.5rem">El número de CH identifica este control en toda la carrera. La vuelta NO se elige: el programa la deduce solo, para evitar confusiones cuando llegan pilotos de vueltas distintas mezclados.</div>
+        <label>Número de CH</label>
+        <input id="s_ctrl" type="number" min="1" max="20" placeholder="1" value="${s.ctrl||''}">
+        <div class="mini" style="margin-top:0.5rem">Identifica este control en toda la carrera. La vuelta NO se elige: el programa la deduce solo, para evitar errores cuando llegan pilotos de vueltas distintas mezclados.</div>
       </div>
       <div class="card">
-        <label>Tu nombre (comisario) — opcional</label>
+        <label>Tu nombre (opcional)</label>
         <input id="s_comisario" placeholder="Ej: Juan" value="${s.comisario||''}">
       </div>
       <button class="btnPasa" style="font-size:1.2rem;padding:1rem" onclick="guardarSetup()">Empezar a fichar →</button>
@@ -354,7 +350,6 @@ function pantallaConfirmar(){
       <div class="card" style="border-color:var(--amber)">
         <div style="text-align:center;padding:0.5rem 0">
           <div style="font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:0.05em">CH${s.ctrl||"?"}</div>
-          <div style="font-size:1.05rem;font-weight:700;margin-top:0.2rem">${s.nombre||""}</div>
           ${s.comisario?`<div class="mini" style="margin-top:0.3rem">Comisario: ${s.comisario}</div>`:""}
           <div class="mini" style="margin-top:0.3rem">Código: <b style="font-family:monospace;letter-spacing:0.1em;color:var(--cyan)">${s.codigo||"—"}</b></div>
           ${hace!=null?`<div class="mini">Configurado hace ${hace<60?hace+" min":Math.round(hace/60)+" h"}</div>`:""}
@@ -383,8 +378,8 @@ function pantallaFichar(){
   <div class="wrap">
     <header>
       <div style="min-width:0">
-        <div class="t">${setup.nombre||'Control'}</div>
-        <div class="sub">CH${setup.ctrl||'?'}${setup.comisario?' · '+setup.comisario:''} · cód ${setup.codigo||'—'}</div>
+        <div class="t">CH${setup.ctrl||'?'}</div>
+        <div class="sub">${setup.comisario?setup.comisario+' · ':''}cód ${setup.codigo||'—'}</div>
         <div class="sub" style="color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
           ${carreraActiva?('🏁 '+carreraActiva):'<span style="color:var(--amber)">⚠ sin carrera activa</span>'}
         </div>
@@ -462,12 +457,11 @@ setInterval(()=>{
 // --- Handlers globales ---
 window.guardarSetup=function(){
   const g=id=>{const el=document.getElementById(id);return el?el.value.trim():"";};
-  const codigo=g("s_codigo"), nombre=g("s_nombre"),
-        ctrl=parseInt(g("s_ctrl"))||null, comisario=g("s_comisario");
+  const codigo=g("s_codigo"), ctrl=parseInt(g("s_ctrl"))||null, comisario=g("s_comisario");
   if(!codigo){ alert("Introduce el código de acceso que te ha dado la organización."); return; }
   if(!ctrl){ alert("Indica el número de CH."); return; }
   const controlId=`ch${ctrl}`;
-  setup={ controlId, nombre:nombre||`CH${ctrl}`, ctrl, comisario, codigo, guardadoEn:Date.now() };
+  setup={ controlId, nombre:`CH${ctrl}`, ctrl, comisario, codigo, guardadoEn:Date.now() };
   save(LS_SETUP, setup);
   confirmado=true;
   pushPresencia();
