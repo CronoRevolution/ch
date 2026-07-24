@@ -96,7 +96,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="2.4";   // súbelo en cada cambio para forzar refresco
+const APP_VER="2.5";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -243,7 +243,7 @@ function sincronizar(){
       ctrl:setup.ctrl||null,
       comisario:setup.comisario||null, anulado:false,
       ts: firebase.database.ServerValue.TIMESTAMP,
-    }).then(()=>{ f.synced=true; });
+    }).then(refPush=>{ f.synced=true; f.pushId=refPush.key; });
   })).then(()=>{
     ultimaSubidaOk=Date.now();
     ultimoError="";
@@ -278,11 +278,18 @@ setInterval(pushPresencia, 20000);
 
 function anular(id){
   const f=queue.find(x=>x.id===id); if(!f) return;
-  // Si ya se sincronizó, marcamos anulado en Firebase (el central lo ignora)
-  if(f.synced && db && setup){
-    // No sabemos el pushId; para simplificar, subimos un fichaje "anulado" que
-    // el central interpretará por dorsal+horaMs. Alternativamente, el central
-    // deduplica por (dorsal,horaMs). Marcamos local:
+  if(!confirm(`¿Anular el fichaje del dorsal ${f.dorsal} (${fmtHora(f.horaMs)})?`))return;
+  // Si ya se subió, hay que BORRARLO de Firebase: si no, el programa central
+  // lo conserva aunque desaparezca de este móvil.
+  if(f.synced && f.pushId && db && setup){
+    const ruta="chFichajes/"+encodeURIComponent(setup.codigo||"sincodigo")+"/"+setup.controlId+"/"+f.pushId;
+    db.ref(ruta).remove()
+      .then(()=>{ toast("✓ Anulado también en el programa"); })
+      .catch(e=>{
+        ultimoError="No se pudo anular en el servidor: "+(e.message||e);
+        toast("⚠ Anulado aquí, pero NO en el programa");
+        render();
+      });
   }
   queue = queue.filter(x=>x.id!==id);
   save(LS_QUEUE, queue); render();
