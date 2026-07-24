@@ -79,6 +79,7 @@
         cursor:pointer; font-family:inherit;}
   .tecla:active{background:var(--panel);}
   .tecla.borrar{color:var(--amber);}
+  .tecla.limpiar{color:var(--red); font-size:1.35rem;}
   .tecla.ok{background:var(--green); color:var(--btnPasaTxt); border-color:var(--green);}
   .tecla.ok:disabled{background:var(--alt); color:var(--muted); border-color:var(--border);}
   .toast{position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%);
@@ -115,7 +116,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="2.9";   // súbelo en cada cambio para forzar refresco
+const APP_VER="3.0";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -476,10 +477,13 @@ function pantallaHoraManual(){
       </div>
       <div class="teclado">
         ${["1","2","3","4","5","6","7","8","9"].map(tecla).join("")}
-        <button class="tecla borrar" onclick="teclaHora('del')">←</button>
+        <button class="tecla limpiar" onclick="teclaHora('clr')" title="Borrar la hora entera">C</button>
         ${tecla("0")}
-        <button class="tecla ok" onclick="confirmarHoraManual()" ${valido?"":"disabled"}>✓</button>
+        <button class="tecla borrar" onclick="teclaHora('del')" title="Borrar un dígito">←</button>
       </div>
+      <button class="btnPasa" style="font-size:1.25rem;padding:1rem" onclick="confirmarHoraManual()" ${valido?"":"disabled"}>
+        ✓ Confirmar ${valido?hh+":"+mm:""}
+      </button>
       <button class="btnSec" style="width:100%" onclick="cancelarHoraManual()">Cancelar</button>
     </main>
   </div>`;
@@ -597,6 +601,7 @@ window.onPasaManual=function(){
 };
 window.teclaHora=function(t){
   if(t==="del")horaManual=horaManual.slice(0,-1);
+  else if(t==="clr")horaManual="";          // borra la hora entera de una vez
   else if(horaManual.length<4)horaManual+=t;
   render();
 };
