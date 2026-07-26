@@ -2,6 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Control Horario — Enduro Revolution</title>
 <!-- Modo app: se instala en la pantalla de inicio y abre sin barra del navegador -->
@@ -70,6 +73,10 @@
   .b-on{background:rgba(34,197,94,0.12); color:var(--green); border:1px solid var(--green);}
   .btnSec{background:var(--alt); color:var(--text); border:1px solid var(--border);
         border-radius:8px; padding:0.6rem; font-size:0.85rem; cursor:pointer; font-family:inherit; font-weight:700;}
+  .pasaHora{display:block; font-size:2.6rem; font-weight:900; letter-spacing:0.04em;
+        font-family:monospace; line-height:1;}
+  .pasaSub{display:block; font-size:0.9rem; font-weight:800; letter-spacing:0.18em;
+        opacity:0.75; margin-top:0.25rem;}
   .btnTema{background:transparent; border:1px solid var(--border); color:var(--text);
         border-radius:8px; padding:0.35rem 0.5rem; font-size:1.1rem; cursor:pointer;
         margin-left:0.5rem; line-height:1;}
@@ -93,9 +100,9 @@
 <div id="root"></div>
 
 <!-- Firebase (compat, para sencillez y un único fichero) -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════
@@ -116,7 +123,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="3.0";   // súbelo en cada cambio para forzar refresco
+const APP_VER="3.2";   // súbelo en cada cambio para forzar refresco
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -209,6 +216,8 @@ let horaManual = "";         // dígitos tecleados (HHMM)
 let ultimoError = "";  // texto del último fallo de subida (para diagnóstico)
 
 function load(k){ try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;} }
+// Relleno con ceros compatible con navegadores antiguos (padStart es de 2017)
+function pad(n,w){ var s=String(n); w=w||2; while(s.length<w)s="0"+s; return s; }
 function save(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
 
 // --- Sincronización de reloj (opción B) ---
@@ -230,11 +239,11 @@ function initClockSync(){
 }
 function horaOficialMs(){ return Date.now() + clockOffset; }
 function fmtHora(ms){
-  const d=new Date(ms); const p=(n,w=2)=>String(n).padStart(w,"0");
+  const d=new Date(ms); const p=function(n,w){return pad(n,w||2);};
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function fmtHoraMs(ms){
-  const d=new Date(ms); const p=(n,w=2)=>String(n).padStart(w,"0");
+  const d=new Date(ms); const p=function(n,w){return pad(n,w||2);};
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(),3)}`;
 }
 
@@ -359,6 +368,15 @@ function aplicarTema(){
   const meta=document.querySelector('meta[name="theme-color"]');
   if(meta)meta.setAttribute("content", temaEfectivo()==="claro"?"#f2f4f7":"#0c0c0f");
 }
+// Recarga saltándose la caché del navegador. Necesario en móviles donde la
+// app no se puede instalar y el navegador retiene versiones antiguas.
+window.recargarApp=function(){
+  try{
+    if(window.caches&&caches.keys){caches.keys().then(function(ks){ks.forEach(function(k){caches.delete(k);});});}
+  }catch(e){}
+  var u=window.location.href.split("#")[0].split("?")[0];
+  window.location.replace(u+"?v="+Date.now());
+};
 window.cambiarTema=function(){
   // Ciclo: auto → claro → oscuro → auto
   tema = tema==="auto" ? "claro" : tema==="claro" ? "oscuro" : "auto";
@@ -409,6 +427,7 @@ function pantallaSetup(){
       <button class="btnPasa" style="font-size:1.2rem;padding:1rem" onclick="guardarSetup()">Empezar a fichar →</button>
       ${promptInstalar?`<button class="btnSec" onclick="instalarApp()" style="width:100%">📲 Instalar como app</button>`:''}
       <button class="btnSec" style="width:100%" onclick="cambiarTema()">${iconoTema()} Tema: ${nombreTema()}</button>
+      <button class="btnSec" style="width:100%;font-size:0.8rem" onclick="recargarApp()">↻ Recargar app (si ves algo raro)</button>
       <div class="mini" style="text-align:center">Reloj: ${clockBadge()} · v${APP_VER}</div>
     </main>
   </div>`;
@@ -457,7 +476,7 @@ function pantallaConfirmar(){
 
 
 function pantallaHoraManual(){
-  const d=horaManual.padEnd(4,"·");
+  var d=horaManual; while(d.length<4)d=d+"·";   // padEnd no existe en navegadores antiguos
   const hh=d.slice(0,2), mm=d.slice(2,4);
   const valido=horaManual.length===4 && parseInt(horaManual.slice(0,2))<24 && parseInt(horaManual.slice(2,4))<60;
   const tecla=(t)=>`<button class="tecla" onclick="teclaHora('${t}')">${t}</button>`;
@@ -526,7 +545,10 @@ function pantallaFichar(){
                placeholder="—" value="${dorsalActual}"
                oninput="dorsalActual=this.value">
       </div>
-      <button class="btnPasa" id="btnPasa" onclick="onPasa()">PASA  ⏱</button>
+      <button class="btnPasa" id="btnPasa" onclick="onPasa()">
+        <span class="pasaHora" id="pasaHora">${fmtHora(horaOficialMs()).slice(0,5)}</span>
+        <span class="pasaSub">PASA</span>
+      </button>
       <div class="row">
         <button class="btnSec" onclick="onPasaManual()">✎ Otra hora</button>
         <button class="btnSec" onclick="cambiarControl()">⚙ Cambiar control</button>
@@ -569,8 +591,12 @@ function render(){
 
 // Reloj en vivo en cabecera (sin re-render completo, para fluidez)
 setInterval(()=>{
+  const h=fmtHora(horaOficialMs());
   const c=document.getElementById("liveclock");
-  if(c) c.textContent=fmtHora(horaOficialMs());
+  if(c) c.textContent=h;
+  // El botón muestra la hora que se registraría al pulsarlo ahora mismo.
+  const p=document.getElementById("pasaHora");
+  if(p) p.textContent=h.slice(0,5);
 }, 250);
 
 // --- Handlers globales ---
@@ -580,7 +606,7 @@ window.guardarSetup=function(){
   if(!codigo){ alert("Introduce el código de acceso que te ha dado la organización."); return; }
   if(!ctrl){ alert("Indica el número de CH."); return; }
   const controlId=`ch${ctrl}`;
-  setup={ controlId, nombre:`CH${ctrl}`, ctrl, comisario, codigo, guardadoEn:Date.now() };
+  setup={ controlId:controlId, nombre:"CH"+ctrl, ctrl:ctrl, comisario:comisario, codigo:codigo, guardadoEn:Date.now() };
   save(LS_SETUP, setup);
   confirmado=true;
   pushPresencia();
@@ -595,7 +621,7 @@ window.onPasaManual=function(){
   if(!dorsalActual.trim()){ toast("Escribe el dorsal primero"); return; }
   // Prellenamos con la hora actual para que solo haya que corregir lo necesario
   const d=new Date(horaOficialMs());
-  horaManual=String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0");
+  horaManual=pad(d.getHours(),2)+pad(d.getMinutes(),2);
   modoManual=true;
   render();
 };
