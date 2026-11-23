@@ -87,6 +87,23 @@
         font-weight:800; font-size:1.1rem; box-shadow:0 8px 30px rgba(0,0,0,.5);
         opacity:0; pointer-events:none; transition:opacity 0.2s; z-index:100;}
   .toast.show{opacity:1;}
+  /* Pilotos previstos (v3.3) */
+  .prev{padding:0.7rem 0.8rem}
+  .prevHead{display:flex;align-items:center;justify-content:space-between;gap:0.4rem;margin-bottom:0.4rem}
+  .prevMin{font-family:monospace;font-weight:900;font-size:0.95rem;margin:0.45rem 0 0.25rem;display:flex;align-items:baseline;gap:0.4rem}
+  .prevMin .et{font-family:inherit;font-size:0.62rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;opacity:0.8}
+  .chips{display:flex;flex-wrap:wrap;gap:0.4rem}
+  .chip{min-width:4.6rem;flex:0 1 auto;background:var(--alt);color:var(--text);border:2px solid var(--border);
+        border-radius:10px;padding:0.35rem 0.5rem;text-align:left;font-family:inherit;cursor:pointer;line-height:1.1}
+  .chip .cd{font-size:1.35rem;font-weight:900;font-family:monospace}
+  .chip .cn{font-size:0.58rem;opacity:0.8;max-width:7.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip.sel{border-color:var(--green);background:rgba(40,170,90,0.22)}
+  .chip.tarde{border-color:var(--amber)}
+  .chip.prox{opacity:0.62}
+  .chip.sel.prox{opacity:1}
+  .pista{font-size:0.7rem;margin-top:0.35rem;min-height:1em}
+  .ausente{display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border)}
+  .ausente .d{font-family:monospace;font-weight:900;font-size:1.1rem;min-width:2.6rem}
 </style>
 </head>
 <body>
@@ -236,6 +253,9 @@ function escucharCarrera(){
     ultimaLecturaFB=Date.now();   // dato recibido = hay conexión
     const c=s.val()||{};
     const nueva=c.name||null;
+    // Para los pilotos previstos (v3.3): la configuración completa, guardada
+    // en el móvil para cuando no haya cobertura.
+    if(s.val()){ liveConfig=c; liveTs=Date.now(); guardarLive(); if(setup&&confirmado&&!modoManual) render(); }
     const info={...(carreraInfo||{}),fecha:c.date||null,nCH:parseInt(c.numTimeControls)||null};
     const cambia=nueva!==carreraActiva||JSON.stringify(info)!==JSON.stringify(carreraInfo);
     carreraActiva=nueva; carreraInfo=info; carreraSinRespuesta=false;
@@ -268,6 +288,288 @@ function htmlCarreraPublicada(){
     </div>`;
 }
 function esc(t){ return String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// El núcleo de cálculo compartido (v3.3): con él la app calcula EXACTAMENTE
+// las mismas horas previstas que el programa central usa para penalizar.
+// No se toca aquí: se edita fuentes\nucleo-calculo.js, se reinserta en los
+// cuatro programas y se comprueba con fuentes\verificar-nucleo.js.
+/* ═══════════════════════════════════════════════════════════════════════════
+   NÚCLEO DE CÁLCULO — Enduro Revolution
+   ---------------------------------------------------------------------------
+   ÚNICA fuente de verdad para horarios, penalizaciones y reglas de puntuación.
+
+   Este bloque se inserta TAL CUAL en los tres programas:
+       · enduro-revolution.html      (app central)
+       · clasificacion-detallada.html (segunda pantalla)
+       · index.html                   (clasificación para el público)
+
+   Durante mucho tiempo cada uno tuvo su propia copia y las diferencias entre
+   ellas provocaron errores reales en carrera: horas distintas según la
+   pantalla, penalizaciones que no coincidían, vueltas descuadradas. Teniendo
+   un solo original, eso no puede volver a ocurrir.
+
+   NO EDITAR ESTE BLOQUE DENTRO DE UN HTML. Se edita en nucleo-calculo.js y se
+   vuelve a insertar en los tres. Cualquier cambio suelto se perderá.
+
+   Reglas de enduro que implementa:
+     · Las penalizaciones de control horario se cuentan POR MINUTOS COMPLETOS:
+       entrar en cualquier segundo del minuto previsto no penaliza.
+     · El encadenado de horas previstas también trunca al minuto.
+     · Los pilotos que no salen ocupan su hueco en el horario: si se les quita,
+       todos los que salen después se adelantan indebidamente.
+     · Un piloto puede llevar un número de vueltas propio, distinto al de su
+       categoría (grupos que corren una vuelta menos).
+     · Opcionalmente, el último control horario de cada piloto no penaliza por
+       adelantarse: con su carrera terminada no tiene sentido hacerle esperar.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const parseT=(str)=>{
+  if(!str)return null;
+  const s=String(str).trim();
+  const parts=s.split(":").map(p=>parseFloat(p));
+  if(parts.some(isNaN))return null;
+  if(parts.length===3)return parts[0]*3600+parts[1]*60+parts[2];
+  if(parts.length===2){
+    // Con decimal → tiempo de vuelta en MM:SS.mmm (ej. "1:23.456")
+    // Sin decimal → siempre HH:MM (ej. "10:15")
+    if(s.includes("."))return parts[0]*60+parts[1];
+    return parts[0]*3600+parts[1]*60;
+  }
+  return null;
+};
+
+const fmtHHMM=(s)=>{
+  if(s==null||isNaN(s))return"--:--";
+  const a=((Math.round(s)%86400)+86400)%86400;
+  return`${Math.floor(a/3600).toString().padStart(2,"0")}:${Math.floor((a%3600)/60).toString().padStart(2,"0")}`;
+};
+
+const fmtHHMMSS=(s)=>{
+  if(s==null||isNaN(s))return"--:--:--";
+  const a=((Math.round(s)%86400)+86400)%86400;
+  return`${Math.floor(a/3600).toString().padStart(2,"0")}:${Math.floor((a%3600)/60).toString().padStart(2,"0")}:${(Math.floor(a)%60).toString().padStart(2,"0")}`;
+};
+
+const getNumLaps=(rider,cfg)=>{
+  // Excepción por piloto: permite que un grupo concreto haga más o menos
+  // vueltas que su categoría SIN tocar categorías ni horarios de salida
+  // (el orden de salida no depende del número de vueltas).
+  const propio=parseInt(rider?.numLaps||"");
+  if(propio>0)return propio;
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  return parseInt(cat?.numLaps||"")||parseInt(cfg.numLaps)||1;
+};
+
+const getCHLaps=(rider,cfg)=>{
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  const v=parseInt(cat?.chLaps||"");
+  const nL=getNumLaps(rider,cfg);
+  return (v>0)?Math.min(v,nL):nL;
+};
+
+const lapHasCH=(rider,cfg,lap)=>lap<=getCHLaps(rider,cfg);
+
+const getCHTime=(rider,cfg,lap,ctrl)=>{
+  const k=`${lap}-${ctrl}`;
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  const cv=cat?.chtimes?.[k];if(cv&&!isNaN(parseFloat(cv)))return parseFloat(cv);
+  const gv=cfg.defaultCHTimes?.[k];if(gv&&!isNaN(parseFloat(gv)))return parseFloat(gv);
+  return 30;
+};
+
+const stageScores=(cfg,s,l,cat)=>{
+  // Per-category override first, then global, then default true
+  if(cat?.stageScoring){
+    const v=cat.stageScoring[`s${s}-l${l}`];
+    if(v!==undefined)return!!v;
+  }
+  const v=cfg.stageScoring?.[`s${s}-l${l}`];
+  return v===undefined?true:!!v;
+};
+
+const getActualStart=(rider,timing)=>{
+  const v=timing?.[rider.id]?.actualStart;
+  return v?parseT(v):null;
+};
+
+const getStartPenalty=(rider,timing)=>{
+  const a=getActualStart(rider,timing);
+  return a!=null?Math.max(0,a-rider.startSecs):0;
+};
+
+const computeSchedule=(riders,cfg)=>{
+  if(!riders.length)return[];
+  const cats=cfg.categories||[];
+  const catOrd=cats.map(c=>c.name);
+  const groups={};catOrd.forEach(n=>{groups[n]=[];});
+  const unknown=[];
+  riders.forEach(r=>{
+    if(groups[r.categoria])groups[r.categoria].push(r);else unknown.push(r);
+  });
+  const ordered=[];
+  catOrd.forEach(name=>{
+    const cat=cats.find(c=>c.name===name);
+    const members=[...(groups[name]||[])];
+    members.sort((a,b)=>parseInt(a.dorsal,10)-parseInt(b.dorsal,10));
+    if(cat?.reverseTop10){
+      const top=members.filter(r=>parseInt(r.dorsal,10)<=10);
+      const rest=members.filter(r=>parseInt(r.dorsal,10)>10);
+      top.reverse();
+      ordered.push(...top,...rest);
+    }else{ordered.push(...members);}
+  });
+  unknown.sort((a,b)=>parseInt(a.dorsal,10)-parseInt(b.dorsal,10));
+  ordered.push(...unknown);
+  const base=parseT(cfg.startTime)??(10*3600+15*60);
+  const cad=(parseInt(cfg.cadence)||1)*60;
+  const grp=Math.max(1,parseInt(cfg.groupSize)||1);
+  // Asignar horas de salida en cola continua: el cambio de categoría NO
+  // introduce un salto. Si la cadencia es 1 min y el grupo 2, salen 2 pilotos
+  // por minuto sin interrupción aunque cambie la categoría a mitad del minuto.
+  // El orden de las categorías se mantiene (lo decide `ordered` arriba).
+  const result=[];
+  let cursor=base;
+  for(let idx=0;idx<ordered.length;idx++){
+    const rider=ordered[idx];
+    if(idx>0){
+      // Avanza una franja de cadencia cada `grp` pilotos consecutivos
+      if(Math.floor(idx/grp)>Math.floor((idx-1)/grp)) cursor+=cad;
+    }
+    // Hora CONGELADA: con la carrera ya arrancada, la salida de un piloto no
+    // debe moverse aunque se reorganicen categorías. Si tiene _startFixed, ese
+    // valor manda y el cálculo automático se ignora para él.
+    const fija=rider._startFixed;
+    if(fija!=null&&!isNaN(parseInt(fija))){
+      const f=parseInt(fija);
+      result.push({...rider,startSecs:f,startStr:fmtHHMM(f)});
+      continue;
+    }
+    const offset=rider._startOffset||0;
+    result.push({...rider,startSecs:cursor+offset,startStr:fmtHHMM(cursor+offset)});
+  }
+  return result;
+};
+
+const getExpected=(rider,cfg,timing)=>{
+  const nL=getNumLaps(rider,cfg),nC=parseInt(cfg.numTimeControls)||1;
+  // Última vuelta CON control horario de ESTE piloto: puede diferir entre
+  // categorías y, con excepciones individuales, incluso entre pilotos.
+  const ultLapCH=Math.min(getCHLaps(rider,cfg),nL);
+  // ¿Se permite adelantarse sin penalizar en el último CH? Opción de carrera.
+  const sinPenalAdelanto=!!cfg.ultimoCHSinAdelanto;
+  const res={};
+  // Si hay hora real de salida, las horas previstas se recalculan desde ella
+  const base=getActualStart(rider,timing)??rider.startSecs;
+  let cur=base;
+  for(let lap=1;lap<=nL;lap++){
+    if(!lapHasCH(rider,cfg,lap))continue; // vuelta sin control horario: no entra en previstos
+    res[lap]={};
+    for(let ctrl=1;ctrl<=nC;ctrl++){
+      const secTime=getCHTime(rider,cfg,lap,ctrl)*60;
+      const exp=cur+secTime;
+      const stored=timing?.[rider.id]?.[`${lap}-${ctrl}`];
+      const actualSecs=stored?.actual?parseT(stored.actual):null;
+      // PENALIZACIÓN AL MINUTO (regla de enduro): entrar en cualquier segundo
+      // del minuto previsto NO penaliza. Si el CH es a las 10:22, entrar a las
+      // 10:22:00 o a las 10:22:59 es igual de puntual. Por eso comparamos
+      // minutos completos, truncando los segundos de ambas horas.
+      const alMinuto=(s)=>Math.floor(s/60)*60;
+      const diff=actualSecs!=null?(alMinuto(actualSecs)-alMinuto(exp)):0;
+      // ÚLTIMO CH DEL PILOTO: al terminar su carrera no tiene sentido hacerle
+      // esperar, así que si está activado se permite adelantarse sin penalizar
+      // (llegar tarde sí penaliza). Cada piloto tiene su propio "último CH":
+      // depende de sus vueltas con CH, que varían por categoría e incluso por
+      // excepción individual.
+      const esUltimoCH=(lap===ultLapCH&&ctrl===nC);
+      const penal=(esUltimoCH&&sinPenalAdelanto)?Math.max(0,diff):Math.abs(diff);
+      res[lap][ctrl]={expected:exp,actualSecs,actualStr:stored?.actual||"",
+        penalty:penal,diff,entered:actualSecs!=null,ultimoCH:esUltimoCH};
+      // El encadenado de la siguiente previsión también va AL MINUTO: el
+      // reglamento cuenta el CH como el minuto en que se pasa, así que los
+      // segundos no deben arrastrarse ni desplazar las previsiones siguientes.
+      cur=actualSecs!=null?alMinuto(actualSecs):exp;
+    }
+  }
+  return res;
+};
+
+const checkAutoDsq=(rider,cfg,timing)=>{
+  const nL=getNumLaps(rider,cfg), nC=parseInt(cfg.numTimeControls)||1;
+  let cur=rider.startSecs; // siempre desde la hora prevista original
+  for(let lap=1;lap<=nL;lap++){
+    if(!lapHasCH(rider,cfg,lap))continue; // sin CH: no se evalúa descalificación por horario
+    for(let ctrl=1;ctrl<=nC;ctrl++){
+      cur+=getCHTime(rider,cfg,lap,ctrl)*60;
+      const stored=timing?.[rider.id]?.[`${lap}-${ctrl}`];
+      const actualSecs=stored?.actual?parseT(stored.actual):null;
+      if(actualSecs!=null){
+        const diff=actualSecs-cur;
+        if(diff>30*60){
+          return{autoDsq:true,reason:`CH${ctrl} V${lap}: +${Math.floor(diff/60)}'${(diff%60).toString().padStart(2,"0")}"`};
+        }
+      }
+    }
+  }
+  return{autoDsq:false,reason:""};
+};
+
+/* Tiempo de una crono tal y como cuenta para la clasificación: lo puesto a
+   mano (timing.crono_s_l) manda sobre lo que llegó del BACK o del decoder.
+   Devuelve el texto tal cual ("6:39.825") o null. Todas las vistas deben leer
+   el tiempo por aquí: la pestaña Clasificación lo leía directamente de
+   stageData y en Sotopalacios dio un total distinto del resto (dorsal 15). */
+const tiempoCronoRaw=(rider,s,l,timing,stageData)=>{
+  const t=timing&&timing[rider.id]&&timing[rider.id][`crono_${s}_${l}`];
+  const ov=t&&t.actual;
+  if(ov)return ov;
+  const sd=stageData&&stageData[`stage_${s}`];
+  return(sd&&sd[rider.dorsal]&&sd[rider.dorsal][l])||null;
+};
+
+/* Diferencias de cada piloto con el anterior clasificado y con el primero de
+   su categoría. Recibe las filas YA ORDENADAS como se enseñan, cada una con:
+     ranked  — si tiene posición (los que no, ni dan ni reciben diferencia)
+     total   — segundos, penalizaciones incluidas
+     hechos  — cronos completados (contarCronosHechos)
+   Solo se compara a pilotos con los MISMOS cronos hechos: entre uno que lleva
+   tres tramos y otro que lleva dos, la resta no significa nada. En ese caso, y
+   para el primero, la diferencia es null (se pinta «—»). Una diferencia
+   negativa tampoco tiene sentido en una lista ordenada: también null.
+   Devuelve [{ant, primero}] en segundos, en el mismo orden que la entrada. */
+const calcDiferencias=(filas)=>{
+  let prev=null, lider=null;
+  return filas.map(f=>{
+    if(!f||!f.ranked)return{ant:null,primero:null};
+    const cmp=(o)=>{
+      if(!o||o.hechos!==f.hechos)return null;
+      const d=f.total-o.total;
+      return d>=0?d:null;
+    };
+    const res=lider?{ant:cmp(prev),primero:cmp(lider)}:{ant:null,primero:null};
+    if(!lider)lider=f;
+    prev=f;
+    return res;
+  });
+};
+
+/* Cuántos cronos ha completado un piloto en total (sumando todas las vueltas).
+   Sirve para ordenar la clasificación con más finura que contando vueltas: dos
+   pilotos en la misma vuelta pueden llevar distinto número de cronos hechos, y
+   quien lleva más va por delante. */
+const contarCronosHechos=(rider,cfg,timing,stageData,nS)=>{
+  const nL=getNumLaps(rider,cfg);
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  let n=0;
+  for(let l=1;l<=nL;l++){
+    for(let s=1;s<=nS;s++){
+      if(!stageScores(cfg,s,l,cat))continue;
+      const ov=timing&&timing[rider.id]&&timing[rider.id][`crono_${s}_${l}`]&&timing[rider.id][`crono_${s}_${l}`].actual;
+      const raw=ov||(stageData&&stageData[`stage_${s}`]&&stageData[`stage_${s}`][rider.dorsal]&&stageData[`stage_${s}`][rider.dorsal][l]);
+      if(raw)n++;
+    }
+  }
+  return n;
+};
 
 // --- Estado ---
 const LS_SETUP="ch_setup", LS_QUEUE="ch_queue";
@@ -344,7 +646,7 @@ function fmtHoraMs(ms){
 }
 
 // --- Fichar un paso ---
-function fichar(dorsal, horaMs){
+function fichar(dorsal, horaMs, varios){
   const d=String(dorsal).trim();
   if(!d) return;
   const f={ id: (Date.now()+"_"+Math.random().toString(36).slice(2,7)),
@@ -355,8 +657,11 @@ function fichar(dorsal, horaMs){
             ctrl:setup?setup.ctrl:null, codigo:setup?setup.codigo:null };
   queue.unshift(f);
   save(LS_QUEUE, queue);
+  if(varios) return;   // confirmarSeleccion avisa, sube y repinta una sola vez
   toast(`✓ ${d}  ${fmtHora(horaMs).slice(0,5)}`);
   dorsalActual="";
+  // Si estaba marcado en la lista de previstos, ya no hace falta.
+  try{ const r=(liveRiders||[]).find(x=>String(x.dorsal)===d); if(r) selPrev.delete(r.id); }catch(e){}
   sincronizar();
   render();
 }
@@ -663,6 +968,231 @@ function pantallaHoraManual(){
   </div>`;
 }
 
+// ═══ PILOTOS PREVISTOS (v3.3) ══════════════════════════════════════════════
+// La app lee del programa central (nodo live/, público) los pilotos, su
+// configuración y las horas de CH ya registradas, y con el NÚCLEO DE CÁLCULO
+// —el mismo del programa— calcula a qué minuto le toca a cada uno pasar por
+// ESTE control. Es dinámico: el núcleo encadena desde el minuto REAL de paso
+// por el control anterior, así que si un piloto llegó 2 min tarde al CH1, en
+// el CH2 aparece 2 min más tarde. Lo fichado en este móvil cuenta al momento,
+// sin esperar a que el programa lo publique.
+// Sin cobertura se usa lo último descargado (se guarda en el móvil). Si del
+// control anterior no se sabe nada, la previsión es la del horario teórico y
+// se marca con «≈».
+// La app NO ficha sola: el comisario marca a los que pasan y confirma.
+const LS_LIVE="ch_live";
+let liveRiders=null, liveTiming=null, liveConfig=null, liveTs=0;
+(()=>{ const c=load(LS_LIVE); if(c&&c.config){ liveConfig=c.config; liveRiders=c.riders||null; liveTiming=c.timing||{}; liveTs=c.ts||0; } })();
+let guardarLiveTimer=null;
+function guardarLive(){
+  clearTimeout(guardarLiveTimer);
+  guardarLiveTimer=setTimeout(()=>{ save(LS_LIVE,{config:liveConfig,riders:liveRiders,timing:liveTiming,ts:liveTs}); },1500);
+}
+function escucharPrevistos(){
+  if(!db) return;
+  const fichando=()=>setup&&confirmado&&!modoManual;
+  db.ref("live/riders").on("value",sn=>{
+    ultimaLecturaFB=Date.now();
+    const v=sn.val(); liveRiders=v?(Array.isArray(v)?v.filter(Boolean):Object.values(v)):null;
+    liveTs=Date.now(); guardarLive(); if(fichando()) render();
+  },()=>{});
+  db.ref("live/timing").on("value",sn=>{
+    ultimaLecturaFB=Date.now();
+    liveTiming=sn.val()||{}; liveTs=Date.now(); guardarLive(); if(fichando()) render();
+  },()=>{});
+}
+let selPrev=new Set();      // ids de piloto marcados en la lista de previstos
+let vistaAusentes=false;    // pantalla «ya les tocaba y no constan»
+const segDelDia=(ms)=>{ const d=new Date(ms); return d.getHours()*3600+d.getMinutes()*60+d.getSeconds(); };
+const hhmm=(sec)=>{ const m=Math.floor(sec/60); return String(Math.floor(m/60)%24).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); };
+
+// → {estado:"ok", items:[{r,lap,exp,teorico}], pasados} o {estado:<motivo>}
+function calcularPrevistos(){
+  if(!setup) return {estado:"sinsetup"};
+  if(!liveConfig||!Array.isArray(liveRiders)||!liveRiders.length) return {estado:"sindatos"};
+  if(liveConfig.date&&liveConfig.date!==hoyISO()) return {estado:"otrodia"};
+  const cfg=liveConfig, ctrl=parseInt(setup.ctrl), nC=parseInt(cfg.numTimeControls)||1;
+  if(!ctrl||ctrl>nC) return {estado:"chfuera"};
+  // Lo fichado en ESTE móvil hoy para este CH, por dorsal
+  const hoy=hoyISO();
+  const locales={};
+  queue.forEach(f=>{
+    if(f.anulado||String(f.ctrl||setup.ctrl)!==String(ctrl)) return;
+    const d=new Date(f.horaMs), p=n=>String(n).padStart(2,"0");
+    if(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`!==hoy) return;
+    (locales[String(f.dorsal)]=locales[String(f.dorsal)]||[]).push(f);
+  });
+  const timing=liveTiming||{};
+  const items=[]; let pasados=0;
+  computeSchedule(liveRiders,cfg).forEach(r=>{
+    if(r.dns) return;
+    const rt=timing[r.id]||{};
+    if(rt.status==="dnf"||rt.status==="dsq") return;
+    let tim=timing;
+    const loc=(locales[String(r.dorsal)]||[]).slice().sort((a,b)=>a.horaMs-b.horaMs);
+    if(loc.length){
+      // Las horas de este móvil que el programa aún no tiene se colocan en las
+      // primeras vueltas libres de este CH (igual que hará el programa).
+      const t2={...rt}, nL=getNumLaps(r,cfg);
+      const yaMin=new Set();
+      for(let l=1;l<=nL;l++){ const v=t2[`${l}-${ctrl}`]; if(v&&v.actual) yaMin.add(Math.floor(parseT(v.actual)/60)); }
+      loc.forEach(f=>{
+        const m=Math.floor(segDelDia(f.horaMs)/60);
+        if(yaMin.has(m)) return;               // ya está en el programa
+        for(let l=1;l<=nL;l++){
+          if(!lapHasCH(r,cfg,l)) continue;
+          const k=`${l}-${ctrl}`;
+          if(!(t2[k]&&t2[k].actual)){ t2[k]={...(t2[k]||{}),actual:fmtHora(f.horaMs)}; yaMin.add(m); break; }
+        }
+      });
+      tim={...timing,[r.id]:t2};
+    }
+    const ex=getExpected(r,cfg,tim);
+    const laps=Object.keys(ex).map(Number).sort((a,b)=>a-b);
+    for(let i=0;i<laps.length;i++){
+      const lap=laps[i], c=ex[lap][ctrl];
+      if(!c) continue;
+      if(c.entered){ pasados++; continue; }
+      // ¿Se sabe por dónde pasó en el control anterior de la cadena?
+      let ant=null;
+      if(ctrl>1) ant=ex[lap][ctrl-1];
+      else if(i>0) ant=ex[laps[i-1]][nC];
+      items.push({r,lap,exp:c.expected,teorico:!!(ant&&!ant.entered)});
+      break;   // solo su próximo paso por este CH
+    }
+  });
+  items.sort((a,b)=>a.exp-b.exp||parseInt(a.r.dorsal)-parseInt(b.r.dorsal));
+  return {estado:"ok",items,pasados};
+}
+
+function chipPrevisto(it,clase){
+  const sel=selPrev.has(it.r.id);
+  // «APELLIDOS, NOMBRE» → los apellidos, que es como se les conoce en la tarjeta.
+  const fn=String(it.r.fullName||"");
+  const nombre=(fn.includes(",")?fn.split(",")[0]:fn).trim().split(/\s+/).slice(0,2).join(" ");
+  return `<button class="chip ${clase}${sel?" sel":""}" onclick="selPrevisto('${String(it.r.id).replace(/'/g,"")}')">
+      <div class="cd">${esc(it.r.dorsal)}${sel?" ✓":""}</div>
+      <div class="cn">${it.teorico?"≈ ":""}V${it.lap} · ${esc(nombre)}</div>
+    </button>`;
+}
+
+function htmlPrevistos(){
+  const P=calcularPrevistos();
+  if(P.estado!=="ok"){
+    const txt={sindatos:"Sin datos de la carrera todavía: con cobertura se descargan solos.",
+      otrodia:"La carrera publicada no es de hoy: no se pueden prever los pasos.",
+      chfuera:`La carrera publicada no tiene el CH${setup.ctrl}.`}[P.estado];
+    return txt?`<div class="card prev"><div class="mini">👀 Previstos: ${txt}</div></div>`:"";
+  }
+  const ahora=segDelDia(horaOficialMs()), M=Math.floor(ahora/60);
+  const enMin=(it)=>Math.floor(it.exp/60);
+  // Retrasados a mano: los de los últimos 10 min. Los anteriores siguen en
+  // «Faltan» (con lo que la lista de arriba no se come la pantalla).
+  const retrasados=P.items.filter(it=>enMin(it)<M&&M-enMin(it)<=10);
+  const faltan=P.items.filter(it=>enMin(it)<M);
+  const ya=P.items.filter(it=>enMin(it)===M);
+  const prox1=P.items.filter(it=>enMin(it)===M+1), prox2=P.items.filter(it=>enMin(it)===M+2);
+  const bloque=(titulo,et,lista,clase,color)=>lista.length?`
+      <div class="prevMin" style="color:${color}">${titulo} <span class="et">${et}</span></div>
+      <div class="chips">${lista.map(it=>chipPrevisto(it,clase)).join("")}</div>`:"";
+  const n=selPrev.size;
+  const antiguo=liveTs&&(Date.now()-liveTs>10*60*1000);
+  return `<div class="card prev">
+      <div class="prevHead">
+        <label style="margin:0">Previstos en CH${setup.ctrl}</label>
+        <button class="btnSec" style="padding:0.3rem 0.55rem;font-size:0.7rem" onclick="verAusentes(true)">📋 Faltan ${faltan.length}</button>
+      </div>
+      <div class="mini">Han pasado ${P.pasados} · ${faltan.length?`<b style="color:var(--amber)">${faltan.length} ya deberían haber pasado</b>`:"ninguno pendiente"}${antiguo?` · <span style="color:var(--amber)">datos de hace ${Math.round((Date.now()-liveTs)/60000)} min</span>`:""}</div>
+      ${ya.length?bloque(hhmm(M*60),"ahora",ya,"","var(--green)"):`<div class="prevMin" style="color:var(--green)">${hhmm(M*60)} <span class="et">ahora · nadie previsto</span></div>`}
+      ${bloque("Retrasados","últimos 10 min",retrasados,"tarde","var(--amber)")}
+      ${faltan.length>retrasados.length?`<div class="mini" style="margin-top:0.25rem">y ${faltan.length-retrasados.length} más de hace más de 10 min → <a href="#" onclick="verAusentes(true);return false" style="color:var(--cyan)">Faltan</a></div>`:""}
+      ${bloque(hhmm((M+1)*60),"siguiente",prox1,"prox","var(--muted)")}
+      ${bloque(hhmm((M+2)*60),"",prox2,"prox","var(--muted)")}
+      ${n?`<button class="btnPasa" style="margin-top:0.6rem;font-size:1.3rem;padding:0.9rem" onclick="confirmarSeleccion()">✓ PASAN ${n}: ${[...selPrev].map(id=>{const r=liveRiders.find(x=>x.id===id);return r?r.dorsal:"?";}).join(", ")}</button>
+             <button class="btnSec" style="width:100%;margin-top:0.35rem;font-size:0.75rem" onclick="limpiarSeleccion()">Desmarcar</button>`:""}
+      ${P.items.some(it=>it.teorico)?`<div class="mini" style="margin-top:0.4rem">≈ = sin dato del control anterior: según horario.</div>`:""}
+    </div>`;
+}
+
+function pantallaAusentes(){
+  const P=calcularPrevistos();
+  const ahora=segDelDia(horaOficialMs()), M=Math.floor(ahora/60);
+  const lista=P.estado==="ok"?P.items.filter(it=>Math.floor(it.exp/60)<M):[];
+  return `<div class="wrap">
+    <header><div><div class="t">Faltan en CH${setup.ctrl}</div><div class="sub">Ya les tocaba pasar y no constan</div></div></header>
+    <main>
+      <div class="card">
+        <div class="mini" style="line-height:1.5">Repásalos con tu tarjeta. Si alguno pasó y no se fichó, toca «Fichar con su hora» y escribe la hora a la que pasó. Los que no aparezcan es que ya constan o no les toca todavía.</div>
+      </div>
+      <div class="card">
+        ${lista.length?lista.map(it=>{
+          const tarde=M-Math.floor(it.exp/60);
+          return `<div class="ausente">
+            <span class="d">${esc(it.r.dorsal)}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:0.8rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.r.fullName||"")}</div>
+              <div class="mini">V${it.lap} · su minuto ${it.teorico?"≈ ":""}${hhmm(it.exp)} · hace ${tarde} min${tarde>30?' · <b style="color:var(--red)">fuera de control</b>':""}</div>
+            </div>
+            <button class="btnSec" style="padding:0.35rem 0.5rem;font-size:0.7rem" onclick="ficharAusente('${esc(it.r.dorsal)}')">Fichar con su hora</button>
+          </div>`;}).join(""):`<div class="mini">Nadie pendiente: todos los que debían pasar ya constan.</div>`}
+      </div>
+      <button class="btnSec" style="width:100%" onclick="verAusentes(false)">← Volver</button>
+    </main></div>`;
+}
+
+// Texto bajo el dorsal tecleado: quién es, cuál es su minuto y si llega
+// adelantado o tarde. Útil también para decirle al piloto que espere.
+function textoPista(dorsal){
+  const d=String(dorsal||"").trim();
+  if(!d) return "";
+  const P=calcularPrevistos();
+  if(P.estado!=="ok") return "";
+  const r=liveRiders.find(x=>String(x.dorsal)===d);
+  if(!r) return `<span style="color:var(--amber)">⚠ El dorsal ${esc(d)} no está en la carrera publicada</span>`;
+  const it=P.items.find(x=>x.r.id===r.id);
+  const nombre=esc(r.fullName||"")+(r.categoria?` · ${esc(r.categoria)}`:"");
+  if(!it) return `${nombre} · <span style="color:var(--amber)">no le queda ningún paso por este CH</span>`;
+  const dif=Math.floor(segDelDia(horaOficialMs())/60)-Math.floor(it.exp/60);
+  const estado=dif===0?`<b style="color:var(--green)">en su minuto</b>`
+    :dif<0?`<b style="color:var(--amber)">llega ${-dif} min ADELANTADO</b>`
+    :`<b style="color:var(--amber)">llega ${dif} min tarde</b>`;
+  return `${nombre} · V${it.lap} · su minuto ${it.teorico?"≈ ":""}${hhmm(it.exp)} → ${estado}`;
+}
+window.pistaDorsal=function(){ const el=document.getElementById("pistaDorsal"); if(el) el.innerHTML=textoPista(dorsalActual); };
+window.selPrevisto=function(id){ if(selPrev.has(id)) selPrev.delete(id); else selPrev.add(id); render(); };
+window.limpiarSeleccion=function(){ selPrev.clear(); render(); };
+window.confirmarSeleccion=function(){
+  if(!selPrev.size) return;
+  const horaMs=horaOficialMs();
+  const dorsales=[...selPrev].map(id=>{const r=(liveRiders||[]).find(x=>x.id===id);return r?String(r.dorsal):null;}).filter(Boolean);
+  selPrev.clear();
+  dorsales.forEach(d=>fichar(d,horaMs,true));
+  toast(`✓ ${dorsales.join(", ")}  ${fmtHora(horaMs).slice(0,5)}`);
+  sincronizar(); render();
+};
+window.verAusentes=function(v){ vistaAusentes=!!v; render(); };
+window.ficharAusente=function(dorsal){
+  vistaAusentes=false; dorsalActual=String(dorsal);
+  window.onPasaManual();
+};
+// Cada minuto: repintar la lista y, si en el minuto nuevo hay pilotos
+// previstos, vibrar (en los móviles que lo permiten).
+let minutoPintado=null;
+setInterval(()=>{
+  if(!setup||!confirmado) return;
+  const M=Math.floor(segDelDia(horaOficialMs())/60);
+  if(minutoPintado===null){ minutoPintado=M; return; }
+  if(M===minutoPintado) return;
+  minutoPintado=M;
+  if(modoManual) return;
+  // Selección del minuto anterior que no se confirmó: se conserva.
+  render();
+  try{
+    const P=calcularPrevistos();
+    if(P.estado==="ok"&&P.items.some(it=>Math.floor(it.exp/60)===M)&&navigator.vibrate) navigator.vibrate([180,90,180]);
+  }catch(e){}
+},1000);
+
 function pantallaFichar(){
   const pend = queue.filter(f=>!f.synced && !f.anulado).length;
   const anulPend = queue.filter(f=>f.anulPend).length;
@@ -720,11 +1250,13 @@ function pantallaFichar(){
                 : codigoMalo() ? `<div class="banner b-off">Subido… pero al código equivocado (ver arriba)</div>`
                 : anulPend ? `<div class="banner b-off">Fichajes al día · falta confirmar ${anulPend===1?'una anulación':anulPend+' anulaciones'}</div>`
                 : `<div class="banner b-on">✓ En línea · todo subido</div>`}
+      ${htmlPrevistos()}
       <div class="card">
-        <label>Dorsal</label>
+        <label>Dorsal ${liveRiders?'<span class="mini" style="text-transform:none;font-weight:400">(adelantados, retrasados o no previstos)</span>':''}</label>
         <input class="dorsalIn" id="dorsalIn" inputmode="numeric" pattern="[0-9]*"
                placeholder="—" value="${dorsalActual}"
-               oninput="dorsalActual=this.value">
+               oninput="dorsalActual=this.value;pistaDorsal()">
+        <div class="pista" id="pistaDorsal">${textoPista(dorsalActual)}</div>
       </div>
       <button class="btnPasa" id="btnPasa" onclick="onPasa()">PASA  ⏱</button>
       <div class="row">
@@ -768,7 +1300,7 @@ function render(){
   const camposSetup={};
   ["s_codigo","s_ctrl","s_comisario"].forEach(id=>{const el=document.getElementById(id);if(el)camposSetup[id]=el.value;});
   const focoSetup=activo&&camposSetup.hasOwnProperty(activo.id)?activo.id:null;
-  root.innerHTML = !setup ? pantallaSetup() : (!confirmado ? pantallaConfirmar() : (modoManual ? pantallaHoraManual() : pantallaFichar()));
+  root.innerHTML = !setup ? pantallaSetup() : (!confirmado ? pantallaConfirmar() : (modoManual ? pantallaHoraManual() : (vistaAusentes ? pantallaAusentes() : pantallaFichar())));
   if(eraDorsal){
     const di=document.getElementById("dorsalIn");
     if(di){
@@ -981,6 +1513,7 @@ window.__chListo=true;
 aplicarTema();
 initClockSync();
 escucharCarrera();
+escucharPrevistos();
 escucharCodigo();
 render();
 probarConexion();
