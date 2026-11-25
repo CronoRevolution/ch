@@ -87,6 +87,17 @@
         font-weight:800; font-size:1.1rem; box-shadow:0 8px 30px rgba(0,0,0,.5);
         opacity:0; pointer-events:none; transition:opacity 0.2s; z-index:100;}
   .toast.show{opacity:1;}
+  /* Chrome < 84 (móviles antiguos, p. ej. Chrome 72) no entiende «gap» en
+     flex: sin esto las tarjetas y botones quedan pegados. Se detecta al
+     arrancar y se pone la clase sinGap en <html>. */
+  .sinGap header>*+*{margin-left:0.6rem}
+  .sinGap main>*+*{margin-top:0.9rem}
+  .sinGap .row>*+*{margin-left:0.5rem}
+  .sinGap .lista>*+*{margin-top:0.4rem}
+  .sinGap .fichaje>*+*{margin-left:0.7rem}
+  .sinGap .chips>*{margin:0 0.4rem 0.4rem 0}
+  .sinGap .prevHead>*+*,.sinGap .prevMin>*+*{margin-left:0.4rem}
+  .sinGap .ausente>*+*{margin-left:0.5rem}
   /* Pilotos previstos (v3.3) */
   .prev{padding:0.7rem 0.8rem}
   .prevHead{display:flex;align-items:center;justify-content:space-between;gap:0.4rem;margin-bottom:0.4rem}
@@ -135,7 +146,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="3.3";   // súbelo en cada cambio (y CACHE en sw.js)
+const APP_VER="3.4";   // súbelo en cada cambio (y CACHE en sw.js)
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -298,10 +309,15 @@ function esc(t){ return String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;",
    ---------------------------------------------------------------------------
    ÚNICA fuente de verdad para horarios, penalizaciones y reglas de puntuación.
 
-   Este bloque se inserta TAL CUAL en los tres programas:
+   Este bloque se inserta TAL CUAL en los cuatro programas:
        · enduro-revolution.html      (app central)
        · clasificacion-detallada.html (segunda pantalla)
        · index.html                   (clasificación para el público)
+       · web/ch/index.html            (app de los comisarios, desde la v3.3)
+
+   SIN «?.» NI «??» (25/11/2026): la app de los CH tiene que funcionar en
+   móviles con Chrome 72, que no los entiende, y un solo error de sintaxis
+   tumba el script entero. Escribir «a&&a.b» y «x!=null?x:y».
 
    Durante mucho tiempo cada uno tuvo su propia copia y las diferencias entre
    ellas provocaron errores reales en carrera: horas distintas según la
@@ -354,15 +370,15 @@ const getNumLaps=(rider,cfg)=>{
   // Excepción por piloto: permite que un grupo concreto haga más o menos
   // vueltas que su categoría SIN tocar categorías ni horarios de salida
   // (el orden de salida no depende del número de vueltas).
-  const propio=parseInt(rider?.numLaps||"");
+  const propio=parseInt((rider&&rider.numLaps)||"");
   if(propio>0)return propio;
   const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
-  return parseInt(cat?.numLaps||"")||parseInt(cfg.numLaps)||1;
+  return parseInt((cat&&cat.numLaps)||"")||parseInt(cfg.numLaps)||1;
 };
 
 const getCHLaps=(rider,cfg)=>{
   const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
-  const v=parseInt(cat?.chLaps||"");
+  const v=parseInt((cat&&cat.chLaps)||"");
   const nL=getNumLaps(rider,cfg);
   return (v>0)?Math.min(v,nL):nL;
 };
@@ -372,23 +388,23 @@ const lapHasCH=(rider,cfg,lap)=>lap<=getCHLaps(rider,cfg);
 const getCHTime=(rider,cfg,lap,ctrl)=>{
   const k=`${lap}-${ctrl}`;
   const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
-  const cv=cat?.chtimes?.[k];if(cv&&!isNaN(parseFloat(cv)))return parseFloat(cv);
-  const gv=cfg.defaultCHTimes?.[k];if(gv&&!isNaN(parseFloat(gv)))return parseFloat(gv);
+  const cv=cat&&cat.chtimes?cat.chtimes[k]:undefined;if(cv&&!isNaN(parseFloat(cv)))return parseFloat(cv);
+  const gv=cfg.defaultCHTimes?cfg.defaultCHTimes[k]:undefined;if(gv&&!isNaN(parseFloat(gv)))return parseFloat(gv);
   return 30;
 };
 
 const stageScores=(cfg,s,l,cat)=>{
   // Per-category override first, then global, then default true
-  if(cat?.stageScoring){
+  if(cat&&cat.stageScoring){
     const v=cat.stageScoring[`s${s}-l${l}`];
     if(v!==undefined)return!!v;
   }
-  const v=cfg.stageScoring?.[`s${s}-l${l}`];
+  const v=cfg.stageScoring?cfg.stageScoring[`s${s}-l${l}`]:undefined;
   return v===undefined?true:!!v;
 };
 
 const getActualStart=(rider,timing)=>{
-  const v=timing?.[rider.id]?.actualStart;
+  const v=timing&&timing[rider.id]?timing[rider.id].actualStart:undefined;
   return v?parseT(v):null;
 };
 
@@ -411,7 +427,7 @@ const computeSchedule=(riders,cfg)=>{
     const cat=cats.find(c=>c.name===name);
     const members=[...(groups[name]||[])];
     members.sort((a,b)=>parseInt(a.dorsal,10)-parseInt(b.dorsal,10));
-    if(cat?.reverseTop10){
+    if(cat&&cat.reverseTop10){
       const top=members.filter(r=>parseInt(r.dorsal,10)<=10);
       const rest=members.filter(r=>parseInt(r.dorsal,10)>10);
       top.reverse();
@@ -420,7 +436,7 @@ const computeSchedule=(riders,cfg)=>{
   });
   unknown.sort((a,b)=>parseInt(a.dorsal,10)-parseInt(b.dorsal,10));
   ordered.push(...unknown);
-  const base=parseT(cfg.startTime)??(10*3600+15*60);
+  const _st=parseT(cfg.startTime);const base=_st!=null?_st:(10*3600+15*60);
   const cad=(parseInt(cfg.cadence)||1)*60;
   const grp=Math.max(1,parseInt(cfg.groupSize)||1);
   // Asignar horas de salida en cola continua: el cambio de categoría NO
@@ -459,7 +475,7 @@ const getExpected=(rider,cfg,timing)=>{
   const sinPenalAdelanto=!!cfg.ultimoCHSinAdelanto;
   const res={};
   // Si hay hora real de salida, las horas previstas se recalculan desde ella
-  const base=getActualStart(rider,timing)??rider.startSecs;
+  const _as=getActualStart(rider,timing);const base=_as!=null?_as:rider.startSecs;
   let cur=base;
   for(let lap=1;lap<=nL;lap++){
     if(!lapHasCH(rider,cfg,lap))continue; // vuelta sin control horario: no entra en previstos
@@ -467,8 +483,8 @@ const getExpected=(rider,cfg,timing)=>{
     for(let ctrl=1;ctrl<=nC;ctrl++){
       const secTime=getCHTime(rider,cfg,lap,ctrl)*60;
       const exp=cur+secTime;
-      const stored=timing?.[rider.id]?.[`${lap}-${ctrl}`];
-      const actualSecs=stored?.actual?parseT(stored.actual):null;
+      const stored=timing&&timing[rider.id]?timing[rider.id][`${lap}-${ctrl}`]:undefined;
+      const actualSecs=stored&&stored.actual?parseT(stored.actual):null;
       // PENALIZACIÓN AL MINUTO (regla de enduro): entrar en cualquier segundo
       // del minuto previsto NO penaliza. Si el CH es a las 10:22, entrar a las
       // 10:22:00 o a las 10:22:59 es igual de puntual. Por eso comparamos
@@ -482,7 +498,7 @@ const getExpected=(rider,cfg,timing)=>{
       // excepción individual.
       const esUltimoCH=(lap===ultLapCH&&ctrl===nC);
       const penal=(esUltimoCH&&sinPenalAdelanto)?Math.max(0,diff):Math.abs(diff);
-      res[lap][ctrl]={expected:exp,actualSecs,actualStr:stored?.actual||"",
+      res[lap][ctrl]={expected:exp,actualSecs,actualStr:(stored&&stored.actual)||"",
         penalty:penal,diff,entered:actualSecs!=null,ultimoCH:esUltimoCH};
       // El encadenado de la siguiente previsión también va AL MINUTO: el
       // reglamento cuenta el CH como el minuto en que se pasa, así que los
@@ -500,8 +516,8 @@ const checkAutoDsq=(rider,cfg,timing)=>{
     if(!lapHasCH(rider,cfg,lap))continue; // sin CH: no se evalúa descalificación por horario
     for(let ctrl=1;ctrl<=nC;ctrl++){
       cur+=getCHTime(rider,cfg,lap,ctrl)*60;
-      const stored=timing?.[rider.id]?.[`${lap}-${ctrl}`];
-      const actualSecs=stored?.actual?parseT(stored.actual):null;
+      const stored=timing&&timing[rider.id]?timing[rider.id][`${lap}-${ctrl}`]:undefined;
+      const actualSecs=stored&&stored.actual?parseT(stored.actual):null;
       if(actualSecs!=null){
         const diff=actualSecs-cur;
         if(diff>30*60){
@@ -1509,6 +1525,15 @@ document.addEventListener("visibilitychange",()=>{
 });
 
 // --- Arranque ---
+// ¿Entiende este navegador «gap» en flex? (Chrome 84+). Si no, márgenes.
+try{
+  const d=document.createElement("div");
+  d.style.cssText="display:flex;flex-direction:column;gap:1px;position:absolute;visibility:hidden";
+  d.appendChild(document.createElement("div"));d.appendChild(document.createElement("div"));
+  document.body.appendChild(d);
+  if(d.scrollHeight!==1)document.documentElement.classList.add("sinGap");
+  d.remove();
+}catch(e){}
 window.__chListo=true;
 aplicarTema();
 initClockSync();

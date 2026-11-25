@@ -6,7 +6,7 @@
    - Solo toca ficheros de la propia app (mismo origen, GET). Firebase
      (websocket y googleapis) pasa por fuera, sin tocar.
    La cola de fichajes NO vive aquí: está en localStorage y la sube la app.   */
-const CACHE = 'chapp-3.3';
+const CACHE = 'chapp-3.4';
 const ESPERA_MS = 4000;
 const FICHEROS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png',
   './lib/firebase-app-compat.js', './lib/firebase-database-compat.js', './lib/firebase-auth-compat.js'];
