@@ -2,6 +2,41 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<script>
+/* DIAGNÓSTICO DE ARRANQUE (v3.5). Escrito a propósito en JavaScript antiguo
+   (ES5), en su propio <script> y el PRIMERO de la página, para que funcione
+   aunque el resto no llegue a ejecutarse. Si la app no consigue pintar nada
+   (pantalla en negro en un móvil antiguo), enseña en pantalla el error exacto
+   y la versión del navegador, para hacerle una foto. Con la app ya en marcha
+   no enseña nada. */
+(function(){
+  var errs=[], inicio=Date.now();
+  function vacia(){var r=document.getElementById("root");return !r||!r.innerHTML;}
+  function show(){
+    if(!document.body){document.addEventListener("DOMContentLoaded",show);return;}
+    var d=document.getElementById("errDiag");
+    if(!d){d=document.createElement("div");d.id="errDiag";
+      d.style.cssText="position:fixed;left:0;right:0;top:0;bottom:0;z-index:99999;background:#fff;color:#000;"+
+        "font:13px/1.4 monospace;padding:12px;white-space:pre-wrap;overflow:auto;border-top:6px solid #c00";
+      document.body.appendChild(d);}
+    d.textContent="⚠ LA APP NO HA PODIDO ARRANCAR\nHaz una foto a esta pantalla y envíasela al cronometrador.\n\n"+
+      "Navegador: "+navigator.userAgent+"\n\n"+errs.join("\n\n");
+  }
+  function anota(t){ if(errs.length<8)errs.push(t); if(vacia()||Date.now()-inicio<3000)show(); }
+  window.onerror=function(m,src,l,c,e){
+    anota(String(m)+"\n  en "+String(src||"").split("/").pop()+" línea "+l+" col "+c+
+      (e&&e.stack?"\n"+String(e.stack).slice(0,500):""));
+  };
+  window.addEventListener("unhandledrejection",function(ev){
+    if(!vacia())return;   // con la app en marcha, Firebase puede rechazar sin que pase nada
+    var r=ev&&ev.reason; anota("Promesa rechazada: "+(r&&r.message?r.message:String(r)));
+  });
+  setTimeout(function(){
+    if(vacia()&&!errs.length){errs.push("La app no ha pintado nada en 6 segundos y no ha dado ningún error.\n"+
+      "firebase: "+(typeof firebase)+" · serviceWorker: "+("serviceWorker" in navigator));show();}
+  },6000);
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Control Horario — Enduro Revolution</title>
 <!-- Modo app: se instala en la pantalla de inicio y abre sin barra del navegador -->
@@ -146,7 +181,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="3.4";   // súbelo en cada cambio (y CACHE en sw.js)
+const APP_VER="3.5";   // súbelo en cada cambio (y CACHE en sw.js)
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
