@@ -181,7 +181,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="3.6";   // súbelo en cada cambio (y CACHE en sw.js)
+const APP_VER="3.7";   // súbelo en cada cambio (y CACHE en sw.js)
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -498,8 +498,11 @@ const computeSchedule=(riders,cfg)=>{
     const rider=ordered[idx];
     if(idx>0){
       const prev=ordered[idx-1];
-      const pausa=prev.categoria!==rider.categoria?pausaEntre(prev.categoria,rider.categoria):0;
-      if(pausa>0){cursor+=cad+Math.round(pausa*60);enFranja=0;}
+      const cambio=prev.categoria!==rider.categoria;
+      const pausa=cambio?pausaEntre(prev.categoria,rider.categoria):0;
+      // cfg.catMinutoNuevo (v3.50): al cambiar de categoría se empieza franja
+      // nueva aunque la anterior no esté llena (el 7º de un grupo de 2 sale solo).
+      if(pausa>0||(cambio&&cfg.catMinutoNuevo)){cursor+=cad+Math.round(pausa*60);enFranja=0;}
       // Sin pausa: avanza una franja de cadencia cada `grp` pilotos consecutivos
       else if(enFranja>=grp){cursor+=cad;enFranja=0;}
     }
