@@ -181,7 +181,7 @@ const firebaseConfig = {
   databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "enduro-revolution-live",
 };
-const APP_VER="3.5";   // súbelo en cada cambio (y CACHE en sw.js)
+const APP_VER="3.6";   // súbelo en cada cambio (y CACHE en sw.js)
 let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
 let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
 let autenticado=false;   // sesión anónima activa (necesaria para escribir)
@@ -478,14 +478,32 @@ const computeSchedule=(riders,cfg)=>{
   // introduce un salto. Si la cadencia es 1 min y el grupo 2, salen 2 pilotos
   // por minuto sin interrupción aunque cambie la categoría a mitad del minuto.
   // El orden de las categorías se mantiene (lo decide `ordered` arriba).
+  // PAUSA ENTRE CATEGORÍAS (v3.50): cat.pausaTras = minutos de hueco entre el
+  // último piloto de esa categoría y el primero de la siguiente. Con pausa, la
+  // nueva categoría empieza franja propia (no comparte minuto con la anterior):
+  // último Senior 10:20, pausa 1 → primer Junior 10:22 (cadencia 1). Si entre
+  // dos categorías con pilotos hay alguna vacía, se suman sus pausas.
+  const posCat={};catOrd.forEach((n,i)=>{if(posCat[n]==null)posCat[n]=i;});
+  const pausaEntre=(a,b)=>{
+    const i=posCat[a],j=posCat[b];
+    if(i==null)return 0;
+    const fin=j==null?catOrd.length:j;
+    let m=0;
+    for(let k=i;k<fin;k++){const c=cats[k];const v=c?parseFloat(c.pausaTras):0;if(v>0)m+=v;}
+    return m;
+  };
   const result=[];
-  let cursor=base;
+  let cursor=base,enFranja=0;
   for(let idx=0;idx<ordered.length;idx++){
     const rider=ordered[idx];
     if(idx>0){
-      // Avanza una franja de cadencia cada `grp` pilotos consecutivos
-      if(Math.floor(idx/grp)>Math.floor((idx-1)/grp)) cursor+=cad;
+      const prev=ordered[idx-1];
+      const pausa=prev.categoria!==rider.categoria?pausaEntre(prev.categoria,rider.categoria):0;
+      if(pausa>0){cursor+=cad+Math.round(pausa*60);enFranja=0;}
+      // Sin pausa: avanza una franja de cadencia cada `grp` pilotos consecutivos
+      else if(enFranja>=grp){cursor+=cad;enFranja=0;}
     }
+    enFranja++;
     // Hora CONGELADA: con la carrera ya arrancada, la salida de un piloto no
     // debe moverse aunque se reorganicen categorías. Si tiene _startFixed, ese
     // valor manda y el cálculo automático se ignora para él.
