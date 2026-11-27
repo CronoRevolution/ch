@@ -1,0 +1,1654 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<script>
+/* DIAGNÓSTICO DE ARRANQUE (v3.5). Escrito a propósito en JavaScript antiguo
+   (ES5), en su propio <script> y el PRIMERO de la página, para que funcione
+   aunque el resto no llegue a ejecutarse. Si la app no consigue pintar nada
+   (pantalla en negro en un móvil antiguo), enseña en pantalla el error exacto
+   y la versión del navegador, para hacerle una foto. Con la app ya en marcha
+   no enseña nada. */
+(function(){
+  var errs=[], inicio=Date.now();
+  function vacia(){var r=document.getElementById("root");return !r||!r.innerHTML;}
+  function show(){
+    if(!document.body){document.addEventListener("DOMContentLoaded",show);return;}
+    var d=document.getElementById("errDiag");
+    if(!d){d=document.createElement("div");d.id="errDiag";
+      d.style.cssText="position:fixed;left:0;right:0;top:0;bottom:0;z-index:99999;background:#fff;color:#000;"+
+        "font:13px/1.4 monospace;padding:12px;white-space:pre-wrap;overflow:auto;border-top:6px solid #c00";
+      document.body.appendChild(d);}
+    d.textContent="⚠ LA APP NO HA PODIDO ARRANCAR\nHaz una foto a esta pantalla y envíasela al cronometrador.\n\n"+
+      "Navegador: "+navigator.userAgent+"\n\n"+errs.join("\n\n");
+  }
+  function anota(t){ if(errs.length<8)errs.push(t); if(vacia()||Date.now()-inicio<3000)show(); }
+  window.onerror=function(m,src,l,c,e){
+    anota(String(m)+"\n  en "+String(src||"").split("/").pop()+" línea "+l+" col "+c+
+      (e&&e.stack?"\n"+String(e.stack).slice(0,500):""));
+  };
+  window.addEventListener("unhandledrejection",function(ev){
+    if(!vacia())return;   // con la app en marcha, Firebase puede rechazar sin que pase nada
+    var r=ev&&ev.reason; anota("Promesa rechazada: "+(r&&r.message?r.message:String(r)));
+  });
+  setTimeout(function(){
+    if(vacia()&&!errs.length){errs.push("La app no ha pintado nada en 6 segundos y no ha dado ningún error.\n"+
+      "firebase: "+(typeof firebase)+" · serviceWorker: "+("serviceWorker" in navigator));show();}
+  },6000);
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DEMO · Control Horario — Enduro Revolution</title>
+<!-- Modo app: se instala en la pantalla de inicio y abre sin barra del navegador -->
+
+<meta name="theme-color" content="#0c0c0f"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Control Horario"/>
+<link rel="apple-touch-icon" href="./icon-192.png"/>
+<style>
+  /* Tema oscuro (por defecto): mejor de noche y con poca luz */
+  :root{ --bg:#0c0c0f; --panel:#17171c; --alt:#1f1f27; --border:#2b2b34;
+         --text:#e8e8ec; --muted:#8a8a95; --red:#c81e1e; --green:#22c55e;
+         --amber:#f59e0b; --cyan:#38bdf8;
+         --btnPasaTxt:#04120a; --btnPasaSombra:#16853f; }
+  /* Tema claro: pensado para SOL DIRECTO. Fondos claros y textos muy oscuros,
+     que es lo que mejor se lee con la pantalla al máximo brillo en exteriores. */
+  body.claro{ --bg:#f2f4f7; --panel:#ffffff; --alt:#e6e9ee; --border:#c3c9d2;
+         --text:#14161a; --muted:#5a6270; --red:#b91c1c; --green:#15803d;
+         --amber:#b45309; --cyan:#0369a1;
+         --btnPasaTxt:#ffffff; --btnPasaSombra:#0f5c2e; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; background:var(--bg); color:var(--text);
+       font-family:'Segoe UI',system-ui,sans-serif; overscroll-behavior:none;
+       font-variant-numeric:tabular-nums;}
+  .wrap{max-width:520px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column;}
+  header{padding:0.7rem 1rem; background:var(--panel); border-bottom:1px solid var(--border);
+         display:flex; align-items:center; gap:0.6rem;}
+  header .t{font-weight:800; font-size:0.95rem;}
+  header .sub{font-size:0.66rem; color:var(--muted);}
+  .clock{margin-left:auto; text-align:right;}
+  .clock .h{font-size:1.15rem; font-weight:800; font-family:monospace;}
+  .clock .s{font-size:0.58rem;}
+  .syncok{color:var(--green);} .syncwarn{color:var(--amber);} .syncbad{color:var(--red);}
+  main{flex:1; padding:1rem; display:flex; flex-direction:column; gap:0.9rem;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:1rem;}
+  label{display:block; font-size:0.66rem; color:var(--muted); font-weight:700;
+        text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.35rem;}
+  input,select{width:100%; background:var(--alt); border:1px solid var(--border);
+        color:var(--text); border-radius:8px; padding:0.6rem 0.7rem; font-size:1rem;
+        font-family:inherit;}
+  .dorsalIn{font-size:2.4rem; font-weight:800; text-align:center; font-family:monospace;
+        letter-spacing:0.05em; padding:0.5rem;}
+  .btnPasa{width:100%; background:var(--green); color:var(--btnPasaTxt); border:none;
+        border-radius:14px; padding:1.5rem; font-size:1.6rem; font-weight:900;
+        cursor:pointer; font-family:inherit; letter-spacing:0.03em;
+        box-shadow:0 6px 0 var(--btnPasaSombra); transition:transform 0.05s, box-shadow 0.05s;}
+  .btnPasa:active{transform:translateY(4px); box-shadow:0 2px 0 var(--btnPasaSombra);}
+  .btnPasa:disabled{background:var(--alt); color:var(--muted); box-shadow:none; cursor:not-allowed;}
+  .row{display:flex; gap:0.5rem;}
+  .row>*{flex:1;}
+  .mini{font-size:0.62rem; color:var(--muted); line-height:1.4;}
+  .lista{display:flex; flex-direction:column; gap:0.4rem; max-height:38vh; overflow-y:auto;}
+  .fichaje{display:flex; align-items:center; gap:0.7rem; padding:0.55rem 0.7rem;
+        background:var(--alt); border-radius:8px; font-size:0.9rem;}
+  .fichaje .d{font-weight:800; font-family:monospace; font-size:1.1rem; min-width:2.5rem;}
+  .fichaje .hh{font-family:monospace; color:var(--cyan);}
+  .fichaje .pend{color:var(--amber); font-size:0.62rem; margin-left:auto;}
+  .fichaje .ok{color:var(--green); font-size:0.62rem; margin-left:auto;}
+  .fichaje button{background:transparent; border:none; color:var(--red);
+        font-size:1.1rem; cursor:pointer; padding:0.2rem 0.4rem;}
+  .setup{gap:0.9rem;}
+  .banner{padding:0.5rem 0.8rem; border-radius:8px; font-size:0.72rem; font-weight:700;
+        text-align:center;}
+  .b-off{background:rgba(245,158,11,0.15); color:var(--amber); border:1px solid var(--amber);}
+  .b-on{background:rgba(34,197,94,0.12); color:var(--green); border:1px solid var(--green);}
+  .btnSec{background:var(--alt); color:var(--text); border:1px solid var(--border);
+        border-radius:8px; padding:0.6rem; font-size:0.85rem; cursor:pointer; font-family:inherit; font-weight:700;}
+  .btnTema{background:transparent; border:1px solid var(--border); color:var(--text);
+        border-radius:8px; padding:0.35rem 0.5rem; font-size:1.1rem; cursor:pointer;
+        margin-left:0.5rem; line-height:1;}
+  .teclado{display:grid; grid-template-columns:repeat(3,1fr); gap:0.5rem; margin:0.3rem 0;}
+  .tecla{background:var(--alt); color:var(--text); border:1px solid var(--border);
+        border-radius:10px; padding:1.1rem 0; font-size:1.6rem; font-weight:800;
+        cursor:pointer; font-family:inherit;}
+  .tecla:active{background:var(--panel);}
+  .tecla.borrar{color:var(--amber);}
+  .tecla.limpiar{color:var(--red); font-size:1.35rem;}
+  .tecla.ok{background:var(--green); color:var(--btnPasaTxt); border-color:var(--green);}
+  .tecla.ok:disabled{background:var(--alt); color:var(--muted); border-color:var(--border);}
+  .toast{position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%);
+        background:var(--green); color:var(--btnPasaTxt); padding:0.7rem 1.4rem; border-radius:10px;
+        font-weight:800; font-size:1.1rem; box-shadow:0 8px 30px rgba(0,0,0,.5);
+        opacity:0; pointer-events:none; transition:opacity 0.2s; z-index:100;}
+  .toast.show{opacity:1;}
+  /* Chrome < 84 (móviles antiguos, p. ej. Chrome 72) no entiende «gap» en
+     flex: sin esto las tarjetas y botones quedan pegados. Se detecta al
+     arrancar y se pone la clase sinGap en <html>. */
+  .sinGap header>*+*{margin-left:0.6rem}
+  .sinGap main>*+*{margin-top:0.9rem}
+  .sinGap .row>*+*{margin-left:0.5rem}
+  .sinGap .lista>*+*{margin-top:0.4rem}
+  .sinGap .fichaje>*+*{margin-left:0.7rem}
+  .sinGap .chips>*{margin:0 0.4rem 0.4rem 0}
+  .sinGap .prevHead>*+*,.sinGap .prevMin>*+*{margin-left:0.4rem}
+  .sinGap .ausente>*+*{margin-left:0.5rem}
+  /* Pilotos previstos (v3.3) */
+  .prev{padding:0.7rem 0.8rem}
+  .prevHead{display:flex;align-items:center;justify-content:space-between;gap:0.4rem;margin-bottom:0.4rem}
+  .prevMin{font-family:monospace;font-weight:900;font-size:0.95rem;margin:0.45rem 0 0.25rem;display:flex;align-items:baseline;gap:0.4rem}
+  .prevMin .et{font-family:inherit;font-size:0.62rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;opacity:0.8}
+  .chips{display:flex;flex-wrap:wrap;gap:0.4rem}
+  .chip{min-width:4.6rem;flex:0 1 auto;background:var(--alt);color:var(--text);border:2px solid var(--border);
+        border-radius:10px;padding:0.35rem 0.5rem;text-align:left;font-family:inherit;cursor:pointer;line-height:1.1}
+  .chip .cd{font-size:1.35rem;font-weight:900;font-family:monospace}
+  .chip .cn{font-size:0.58rem;opacity:0.8;max-width:7.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip.sel{border-color:var(--green);background:rgba(40,170,90,0.22)}
+  .chip.tarde{border-color:var(--amber)}
+  .chip.prox{opacity:0.62}
+  .chip.sel.prox{opacity:1}
+  .pista{font-size:0.7rem;margin-top:0.35rem;min-height:1em}
+  .ausente{display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid var(--border)}
+  .ausente .d{font-family:monospace;font-weight:900;font-size:1.1rem;min-width:2.6rem}
+</style>
+</head>
+<body>
+<div style="position:sticky;top:0;z-index:9999;background:#7c3aed;color:#fff;font:700 13px/1.35 system-ui,sans-serif;
+  padding:7px 10px;text-align:center">🎓 MODO DEMOSTRACIÓN — nada se envía al programa. Código: <b>1234</b>.
+  Al recargar se borra todo.</div>
+<div id="root"></div>
+
+<!-- Firebase (compat 9.23.0). Va DENTRO de la app (carpeta lib/), no se
+     descarga de gstatic: así, con la app guardada en el móvil, arranca sin
+     cobertura. Es la misma versión que se cargaba antes de gstatic. -->
+<script>
+/* ═══ MODO DEMOSTRACIÓN — simulador de Firebase en memoria ═══ */
+(function(){
+  var mem={};
+  window.demoStorage={getItem:function(k){return Object.prototype.hasOwnProperty.call(mem,k)?mem[k]:null;},
+    setItem:function(k,v){mem[k]=String(v);if(k==='ch_setup')setTimeout(reemitir,50);},
+    removeItem:function(k){delete mem[k];},clear:function(){mem={};}};
+  var RIDERS=[{"id":"d0","dorsal":"1","fullName":"GARCÍA LÓPEZ, Javier","categoria":"Enduro 91 - SUP"},{"id":"d1","dorsal":"2","fullName":"MARTÍN RUIZ, Pablo","categoria":"Enduro 91 - SUP"},{"id":"d2","dorsal":"3","fullName":"SÁNCHEZ GIL, Carlos","categoria":"Enduro 91 - SUP"},{"id":"d3","dorsal":"4","fullName":"FERNÁNDEZ DÍAZ, Luis","categoria":"Enduro 91 - SUP"},{"id":"d4","dorsal":"7","fullName":"GÓMEZ MORENO, Andrés","categoria":"Enduro 91 - 125 cc"},{"id":"d5","dorsal":"8","fullName":"PÉREZ ALONSO, Sergio","categoria":"Enduro 91 - 125 cc"},{"id":"d6","dorsal":"9","fullName":"RODRÍGUEZ SANZ, Iván","categoria":"Enduro 91 - 125 cc"},{"id":"d7","dorsal":"10","fullName":"LÓPEZ BLANCO, Raúl","categoria":"Enduro 91 - 125 cc"},{"id":"d8","dorsal":"13","fullName":"DÍAZ CASTRO, Óscar","categoria":"TRAIL 99"},{"id":"d9","dorsal":"14","fullName":"MORENO ORTEGA, Diego","categoria":"TRAIL 99"},{"id":"d10","dorsal":"15","fullName":"ÁLVAREZ RUBIO, Jorge","categoria":"TRAIL 99"},{"id":"d11","dorsal":"16","fullName":"ROMERO MOLINA, Álvaro","categoria":"TRAIL 99"},{"id":"d12","dorsal":"17","fullName":"NAVARRO DELGADO, Hugo","categoria":"TRAIL 99"},{"id":"d13","dorsal":"21","fullName":"TORRES SUÁREZ, Marcos","categoria":"Enduro 82 - SUP"},{"id":"d14","dorsal":"22","fullName":"RAMOS VEGA, Adrián","categoria":"Enduro 82 - SUP"},{"id":"d15","dorsal":"23","fullName":"GARCÍA LÓPEZ, Javier 2","categoria":"Enduro 82 - SUP"},{"id":"d16","dorsal":"24","fullName":"MARTÍN RUIZ, Pablo 2","categoria":"Enduro 82 - SUP"},{"id":"d17","dorsal":"27","fullName":"SÁNCHEZ GIL, Carlos 2","categoria":"Enduro 82 - 125 cc"},{"id":"d18","dorsal":"28","fullName":"FERNÁNDEZ DÍAZ, Luis 2","categoria":"Enduro 82 - 125 cc"},{"id":"d19","dorsal":"29","fullName":"GÓMEZ MORENO, Andrés 2","categoria":"Enduro 82 - 125 cc"},{"id":"d20","dorsal":"30","fullName":"PÉREZ ALONSO, Sergio 2","categoria":"Enduro 82 - 125 cc"},{"id":"d21","dorsal":"31","fullName":"RODRÍGUEZ SANZ, Iván 2","categoria":"Enduro 82 - 125 cc"},{"id":"d22","dorsal":"32","fullName":"LÓPEZ BLANCO, Raúl 2","categoria":"Enduro 82 - 125 cc"},{"id":"d23","dorsal":"33","fullName":"DÍAZ CASTRO, Óscar 2","categoria":"Enduro 82 - 125 cc"},{"id":"d24","dorsal":"34","fullName":"MORENO ORTEGA, Diego 2","categoria":"Enduro 82 - 125 cc"},{"id":"d25","dorsal":"37","fullName":"ÁLVAREZ RUBIO, Jorge 2","categoria":"TT 79"},{"id":"d26","dorsal":"38","fullName":"ROMERO MOLINA, Álvaro 2","categoria":"TT 79"},{"id":"d27","dorsal":"39","fullName":"NAVARRO DELGADO, Hugo 2","categoria":"TT 79"},{"id":"d28","dorsal":"40","fullName":"TORRES SUÁREZ, Marcos 2","categoria":"TT 79"},{"id":"d29","dorsal":"41","fullName":"RAMOS VEGA, Adrián 2","categoria":"TT 79"},{"id":"d30","dorsal":"43","fullName":"GARCÍA LÓPEZ, Javier 3","categoria":"TT 75"},{"id":"d31","dorsal":"44","fullName":"MARTÍN RUIZ, Pablo 3","categoria":"TT 75"},{"id":"d32","dorsal":"45","fullName":"SÁNCHEZ GIL, Carlos 3","categoria":"TT 75"},{"id":"d33","dorsal":"46","fullName":"FERNÁNDEZ DÍAZ, Luis 3","categoria":"TT 75"},{"id":"d34","dorsal":"51","fullName":"GÓMEZ MORENO, Andrés 3","categoria":"Pre 1991"},{"id":"d35","dorsal":"52","fullName":"PÉREZ ALONSO, Sergio 3","categoria":"Pre 1991"},{"id":"d36","dorsal":"53","fullName":"RODRÍGUEZ SANZ, Iván 3","categoria":"Pre 1991"},{"id":"d37","dorsal":"54","fullName":"LÓPEZ BLANCO, Raúl 3","categoria":"Pre 1991"},{"id":"d38","dorsal":"55","fullName":"DÍAZ CASTRO, Óscar 3","categoria":"Pre 1991"},{"id":"d39","dorsal":"56","fullName":"MORENO ORTEGA, Diego 3","categoria":"Pre 1991"},{"id":"d40","dorsal":"57","fullName":"ÁLVAREZ RUBIO, Jorge 3","categoria":"EVO"},{"id":"d41","dorsal":"58","fullName":"ROMERO MOLINA, Álvaro 3","categoria":"EVO"}];
+  var BASE={"name":"DEMO · Carrera de prueba","numTimeControls":2,"numLaps":3,"numStages":2,"cadence":1,"groupSize":2,"catMinutoNuevo":true,"categories":[{"id":1795710922643,"name":"Enduro 91 - SUP","numLaps":"","chtimes":{"1-1":"45","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false,"pausaTras":"1"},{"id":1795710922650,"name":"Pre 1991","numLaps":"","chtimes":{"1-1":"45","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false},{"id":5,"name":"EVO","numLaps":"","chtimes":{"1-1":"45","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false},{"id":1795710922644,"name":"Enduro 91 - 125 cc","numLaps":"","chtimes":{"1-1":"45","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false,"pausaTras":"1"},{"id":1795710922645,"name":"TRAIL 99","numLaps":"","chtimes":{"2-1":"55","3-1":"55","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false,"pausaTras":"1"},{"id":1795710922646,"name":"Enduro 82 - SUP","numLaps":"","chtimes":{"1-1":"55","2-1":"60","3-1":"60","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false,"pausaTras":"1"},{"id":1795710922647,"name":"Enduro 82 - 125 cc","numLaps":"","chtimes":{"1-1":"55","2-1":"60","3-1":"60","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false,"pausaTras":"2"},{"id":1795710922648,"name":"TT 79","numLaps":"","chtimes":{"1-1":"55","2-1":"60","2-2":"","3-1":"60","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false,"pausaTras":""},{"id":1795710922649,"name":"TT 75","numLaps":"","chtimes":{"1-1":"55","2-1":"60","3-1":"60","3-2":"15"},"stageScoring":{},"reverseTop10":false,"inScratch":false}],"defaultCHTimes":{"1-1":"50","1-2":"20","1-3":"30","2-1":"50","2-2":"20","2-3":"30","3-1":"50","3-2":"20","3-3":"30"},"ultimoCHSinAdelanto":true,"startTime":"10:00","chModo":{},"stageScoring":{}};
+  var p2=function(n){return String(n).padStart(2,'0');};
+  function hoy(){var d=new Date();return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());}
+  function ctrlElegido(){try{var s=JSON.parse(mem.ch_setup||'null');return s&&parseInt(s.ctrl)||1;}catch(e){return 1;}}
+  // Hora de salida para que el primer piloto llegue al CH elegido hace 3 min:
+  // así hay retrasados, pilotos en el minuto actual y los siguientes.
+  function config(){
+    var c=JSON.parse(JSON.stringify(BASE)); c.date=hoy();
+    try{
+      var c0=JSON.parse(JSON.stringify(c)); c0.startTime='00:00';
+      var sch=computeSchedule(RIDERS,c0), ctrl=ctrlElegido(), ex=null;
+      var e=getExpected(sch[0],c0,{});
+      Object.keys(e).sort(function(a,b){return a-b;}).some(function(l){if(e[l][ctrl]){ex=e[l][ctrl].expected;return true;}return false;});
+      if(ex!=null){
+        var d=new Date(), ahora=d.getHours()*3600+d.getMinutes()*60;
+        var ini=Math.max(0,ahora-180-ex); ini=Math.floor(ini/60)*60;
+        c.startTime=p2(Math.floor(ini/3600))+':'+p2(Math.floor(ini/60)%60);
+      }
+    }catch(err){}
+    return c;
+  }
+  var DATOS={'.info/connected':true,'.info/serverTimeOffset':0,'chConfig/codigo':'1234','live/raceState':'started','live/riders':RIDERS,'live/timing':{}};
+  function valor(p){return p==='live/config'?config():(Object.prototype.hasOwnProperty.call(DATOS,p)?DATOS[p]:null);}
+  function snap(v,k){return{val:function(){return v;},exists:function(){return v!=null;},key:k||null,forEach:function(){},numChildren:function(){return 0;}};}
+  var cbs={}, n=0;
+  function reemitir(){(cbs['live/config']||[]).forEach(function(cb){cb(snap(config()));});}
+  var P=function(v){return Promise.resolve(v);};
+  function ref(path){var r={
+    on:function(ev,cb){(cbs[path]=cbs[path]||[]).push(cb);setTimeout(function(){cb(snap(valor(path)));},60);return cb;},
+    off:function(){}, once:function(){return P(snap(valor(path)));},
+    set:function(){return P();}, update:function(){return P();}, remove:function(){return P();},
+    push:function(){var k='demo'+(++n);return P({key:k});},
+    child:function(c){return ref(path+'/'+c);},
+    onDisconnect:function(){return{remove:P,set:P,cancel:P,update:P};},
+    orderByChild:function(){return r;},limitToLast:function(){return r;},equalTo:function(){return r;},startAt:function(){return r;}};return r;}
+  window.firebase={initializeApp:function(){},
+    database:Object.assign(function(){return{ref:ref,goOnline:function(){},goOffline:function(){}};},{ServerValue:{TIMESTAMP:{}}}),
+    auth:function(){return{onAuthStateChanged:function(cb){setTimeout(function(){cb({uid:'demo'});},0);return function(){};},
+      signInAnonymously:function(){return P({});}};}};
+})();
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONTROL HORARIO — App de comisario
+//  Ficha la hora real de paso de cada dorsal en un CH y la sincroniza al
+//  programa central vía Firebase. Funciona offline (cola local) y corrige el
+//  desfase del reloj del móvil contra el reloj de servidor (opción B).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// --- Config Firebase (misma BD que el resto del sistema) ---
+// Configuración COMPLETA: la apiKey es imprescindible para que funcione la
+// autenticación anónima. Sin ella, signInAnonymously() falla y todas las
+// escrituras reciben PERMISSION_DENIED (las lecturas sí funcionan, porque
+// son públicas — de ahí que el reloj y la carrera sí llegaran).
+const firebaseConfig = {
+  apiKey: "AIzaSyDIpeH0Nj7aXEDcg5a4figmCYCvTL_hpfU",
+  authDomain: "enduro-revolution-live.firebaseapp.com",
+  databaseURL: "https://enduro-revolution-live-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "enduro-revolution-live",
+};
+const APP_VER="DEMO 3.7";   // súbelo en cada cambio (y CACHE en sw.js)
+let db=null, connected=false, ultimaSubidaOk=0, pruebaEscrituraOk=false;
+let ultimaLecturaFB=0;   // última vez que Firebase nos envió algo (prueba de conexión)
+let autenticado=false;   // sesión anónima activa (necesaria para escribir)
+let errorAuth="";        // último error de autenticación
+try{
+  firebase.initializeApp(firebaseConfig);
+  db=firebase.database();
+  // Autenticación anónima: obligatoria para poder escribir. Reintenta si falla,
+  // y deja constancia del error para poder diagnosticarlo desde la propia app.
+  firebase.auth().onAuthStateChanged(u=>{ autenticado=!!u; render(); });
+  // Se reintenta SIEMPRE, cada vez más espaciado y como mucho cada 30 s.
+  // Antes paraba al quinto intento (~45 s): un móvil que abría la app sin
+  // cobertura y la recuperaba más tarde se quedaba sin sesión, y sin sesión
+  // la cola no se sube nunca (sincronizar exige autenticado). Con la app
+  // arrancando sin red, ese caso deja de ser raro.
+  let authTimer=null, authEnCurso=false;
+  const intentarAuth=(n=0)=>{
+    if(autenticado||authEnCurso) return;
+    clearTimeout(authTimer); authEnCurso=true;
+    firebase.auth().signInAnonymously().then(()=>{ authEnCurso=false; errorAuth=""; }).catch(e=>{
+      authEnCurso=false;
+      errorAuth=e.message||String(e);
+      console.warn("auth",errorAuth);
+      authTimer=setTimeout(()=>intentarAuth(n+1), Math.min(3000*(n+1),30000));
+      render();
+    });
+  };
+  window.__intentarAuth=intentarAuth;
+  // Al volver la red no se espera al siguiente intento programado.
+  window.addEventListener("online",()=>{ if(!autenticado) intentarAuth(0); });
+  intentarAuth();
+  db.ref(".info/connected").on("value",s=>{ connected=!!s.val(); render(); });
+}catch(e){ console.warn("Firebase init", e); }
+
+// Prueba ACTIVA de conexión: intenta escribir en un nodo de prueba cada 15s.
+// Es más fiable que .info/connected, que da falsos negativos con frecuencia.
+// Si la escritura funciona, hay conexión real y permisos correctos.
+function probarConexion(){
+  if(!db) return;
+  db.ref("chPing/"+(setup?setup.controlId:"anon")).set({
+    ts: firebase.database.ServerValue.TIMESTAMP
+  }).then(()=>{
+    pruebaEscrituraOk=true; ultimaSubidaOk=Date.now(); render();
+  }).catch(()=>{
+    pruebaEscrituraOk=false; render();
+  });
+}
+setInterval(probarConexion, 15000);
+
+// Hay conexión si CUALQUIERA de estas señales es positiva:
+//  - Firebase dice que está conectado
+//  - Una escritura funcionó hace menos de 45s
+function hayConexion(){
+  // Cualquiera de estas señales prueba que hay conexión con Firebase:
+  //  - Firebase declara estar conectado
+  //  - Una escritura funcionó hace poco
+  //  - Recibimos datos de Firebase hace poco (reloj, carrera...)
+  const ahora=Date.now();
+  return connected
+      || pruebaEscrituraOk
+      || (ahora-ultimaSubidaOk  < 45000)
+      || (ahora-ultimaLecturaFB < 60000);
+}
+
+// --- Código de acceso: comprobarlo contra el que usa el programa central ---
+// El código va en la RUTA de Firebase, así que cualquier valor es válido y los
+// fichajes suben con éxito a un sitio que no lee nadie. Comprobado: con el
+// código 9999 en vez del 1234 la app enseña el banner verde toda la mañana.
+// Por eso hace falta preguntarle al central cuál es el bueno.
+let codigoServidor=null;   // null = todavía no lo sabemos (sin red o sin generar)
+function escucharCodigo(){
+  if(!db) return;
+  db.ref("chConfig/codigo").on("value",s=>{
+    ultimaLecturaFB=Date.now();
+    const v=s.val();
+    const nuevo = v ? String(v) : "";
+    if(nuevo!==codigoServidor){ codigoServidor=nuevo; render(); }
+  },()=>{});
+}
+// Se comprueba también DESPUÉS de configurar: el código puede regenerarse a
+// media mañana y este móvil se quedaría fichando al vacío sin enterarse.
+function codigoMalo(){
+  return !!setup && !!codigoServidor && String(setup.codigo||"")!==codigoServidor;
+}
+// Consulta puntual, con tope de espera: sin red no se puede comprobar, y eso
+// no puede impedir empezar a fichar.
+function comprobarCodigo(codigo){
+  return new Promise(res=>{
+    if(!db) return res({estado:"nosesabe"});
+    let hecho=false;
+    const t=setTimeout(()=>{ if(!hecho){ hecho=true; res({estado:"nosesabe"}); } },4000);
+    db.ref("chConfig/codigo").once("value").then(s=>{
+      if(hecho) return; hecho=true; clearTimeout(t);
+      ultimaLecturaFB=Date.now();
+      const v=s.val()?String(s.val()):"";
+      codigoServidor=v;
+      if(!v) return res({estado:"nosesabe"});
+      res(v===String(codigo) ? {estado:"ok"} : {estado:"malo", servidor:v});
+    }).catch(()=>{ if(hecho) return; hecho=true; clearTimeout(t); res({estado:"nosesabe"}); });
+  });
+}
+
+// --- Carrera activa: la lee del nodo live/ que publica el programa central ---
+// Así el comisario ve para qué carrera está fichando, sin configurar nada.
+let carreraActiva=null;
+// Lo que la pantalla de configuración enseña de la carrera publicada (v3.3):
+// null = aún no se sabe (sin respuesta del servidor); si no, {fecha, nCH, estado}.
+let carreraInfo=null, carreraSinRespuesta=false;
+function escucharCarrera(){
+  if(!db)return;
+  // Sin cobertura Firebase no contesta nunca: a los 6 s se dice, en vez de
+  // dejar «buscando…» para siempre. Si luego contesta, se actualiza solo.
+  setTimeout(()=>{ if(!carreraInfo){ carreraSinRespuesta=true; render(); } },6000);
+  db.ref("live/config").on("value",s=>{
+    ultimaLecturaFB=Date.now();   // dato recibido = hay conexión
+    const c=s.val()||{};
+    const nueva=c.name||null;
+    // Para los pilotos previstos (v3.3): la configuración completa, guardada
+    // en el móvil para cuando no haya cobertura.
+    if(s.val()){ liveConfig=c; liveTs=Date.now(); guardarLive(); if(setup&&confirmado&&!modoManual) render(); }
+    const info={...(carreraInfo||{}),fecha:c.date||null,nCH:parseInt(c.numTimeControls)||null};
+    const cambia=nueva!==carreraActiva||JSON.stringify(info)!==JSON.stringify(carreraInfo);
+    carreraActiva=nueva; carreraInfo=info; carreraSinRespuesta=false;
+    if(cambia) render();
+  },()=>{});
+  db.ref("live/raceState").on("value",s=>{
+    const est=s.val()||null;
+    if(!carreraInfo||carreraInfo.estado!==est){ carreraInfo={...(carreraInfo||{}),estado:est}; render(); }
+  },()=>{});
+}
+function hoyISO(){ const d=new Date(horaOficialMs()); const p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+function fmtFechaISO(f){ const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(f||""); return m?`${m[3]}/${m[2]}/${m[1]}`:(f||""); }
+// Recuadro «Carrera publicada» de la pantalla de configuración.
+function htmlCarreraPublicada(){
+  if(!db) return `<div class="card"><div class="mini">🏁 No se puede consultar la carrera: la conexión con el servidor no está disponible. Puedes configurar y fichar igual.</div></div>`;
+  if(!carreraInfo) return `<div class="card"><div class="mini">🏁 ${carreraSinRespuesta
+      ? "Sin cobertura: no se puede ver qué carrera está publicada. Puedes configurar y fichar igual; se subirá todo al volver la señal."
+      : "Buscando la carrera publicada…"}</div></div>`;
+  if(!carreraActiva) return `<div class="card" style="border-color:var(--amber)">
+      <div style="color:var(--amber);font-weight:700;font-size:0.8rem">🏁 No hay ninguna carrera publicada</div>
+      <div class="mini" style="margin-top:0.3rem">Puedes fichar y se guardará, pero confirma con la organización que el programa está en marcha.</div></div>`;
+  const esHoy=carreraInfo.fecha===hoyISO();
+  const est={not_started:"sin empezar",started:"en curso",finished:"finalizada"}[carreraInfo.estado]||"";
+  return `<div class="card" style="border-color:${esHoy?"var(--green)":"var(--amber)"}">
+      <div class="mini">Carrera publicada</div>
+      <div style="font-weight:800;font-size:1.05rem;margin:0.15rem 0;color:var(--cyan)">${esc(carreraActiva)}</div>
+      <div class="mini">${carreraInfo.fecha?fmtFechaISO(carreraInfo.fecha):"sin fecha"}${esHoy?' · <b style="color:var(--green)">hoy</b>':''}${est?" · "+est:""}${carreraInfo.nCH?` · CH del 1 al ${carreraInfo.nCH}`:""}</div>
+      ${!esHoy&&carreraInfo.fecha?`<div class="mini" style="color:var(--amber);margin-top:0.3rem">⚠ No es de hoy: puede que el programa aún no haya publicado la carrera del día. Pregunta antes de fichar.</div>`:""}
+    </div>`;
+}
+function esc(t){ return String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// El núcleo de cálculo compartido (v3.3): con él la app calcula EXACTAMENTE
+// las mismas horas previstas que el programa central usa para penalizar.
+// No se toca aquí: se edita fuentes\nucleo-calculo.js, se reinserta en los
+// cuatro programas y se comprueba con fuentes\verificar-nucleo.js.
+/* ═══════════════════════════════════════════════════════════════════════════
+   NÚCLEO DE CÁLCULO — Enduro Revolution
+   ---------------------------------------------------------------------------
+   ÚNICA fuente de verdad para horarios, penalizaciones y reglas de puntuación.
+
+   Este bloque se inserta TAL CUAL en los cuatro programas:
+       · enduro-revolution.html      (app central)
+       · clasificacion-detallada.html (segunda pantalla)
+       · index.html                   (clasificación para el público)
+       · web/ch/index.html            (app de los comisarios, desde la v3.3)
+
+   SIN «?.» NI «??» (25/11/2026): la app de los CH tiene que funcionar en
+   móviles con Chrome 72, que no los entiende, y un solo error de sintaxis
+   tumba el script entero. Escribir «a&&a.b» y «x!=null?x:y».
+
+   Durante mucho tiempo cada uno tuvo su propia copia y las diferencias entre
+   ellas provocaron errores reales en carrera: horas distintas según la
+   pantalla, penalizaciones que no coincidían, vueltas descuadradas. Teniendo
+   un solo original, eso no puede volver a ocurrir.
+
+   NO EDITAR ESTE BLOQUE DENTRO DE UN HTML. Se edita en nucleo-calculo.js y se
+   vuelve a insertar en los tres. Cualquier cambio suelto se perderá.
+
+   Reglas de enduro que implementa:
+     · Las penalizaciones de control horario se cuentan POR MINUTOS COMPLETOS:
+       entrar en cualquier segundo del minuto previsto no penaliza.
+     · El encadenado de horas previstas también trunca al minuto.
+     · Los pilotos que no salen ocupan su hueco en el horario: si se les quita,
+       todos los que salen después se adelantan indebidamente.
+     · Un piloto puede llevar un número de vueltas propio, distinto al de su
+       categoría (grupos que corren una vuelta menos).
+     · Opcionalmente, el último control horario de cada piloto no penaliza por
+       adelantarse: con su carrera terminada no tiene sentido hacerle esperar.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const parseT=(str)=>{
+  if(!str)return null;
+  const s=String(str).trim();
+  const parts=s.split(":").map(p=>parseFloat(p));
+  if(parts.some(isNaN))return null;
+  if(parts.length===3)return parts[0]*3600+parts[1]*60+parts[2];
+  if(parts.length===2){
+    // Con decimal → tiempo de vuelta en MM:SS.mmm (ej. "1:23.456")
+    // Sin decimal → siempre HH:MM (ej. "10:15")
+    if(s.includes("."))return parts[0]*60+parts[1];
+    return parts[0]*3600+parts[1]*60;
+  }
+  return null;
+};
+
+const fmtHHMM=(s)=>{
+  if(s==null||isNaN(s))return"--:--";
+  const a=((Math.round(s)%86400)+86400)%86400;
+  return`${Math.floor(a/3600).toString().padStart(2,"0")}:${Math.floor((a%3600)/60).toString().padStart(2,"0")}`;
+};
+
+const fmtHHMMSS=(s)=>{
+  if(s==null||isNaN(s))return"--:--:--";
+  const a=((Math.round(s)%86400)+86400)%86400;
+  return`${Math.floor(a/3600).toString().padStart(2,"0")}:${Math.floor((a%3600)/60).toString().padStart(2,"0")}:${(Math.floor(a)%60).toString().padStart(2,"0")}`;
+};
+
+const getNumLaps=(rider,cfg)=>{
+  // Excepción por piloto: permite que un grupo concreto haga más o menos
+  // vueltas que su categoría SIN tocar categorías ni horarios de salida
+  // (el orden de salida no depende del número de vueltas).
+  const propio=parseInt((rider&&rider.numLaps)||"");
+  if(propio>0)return propio;
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  return parseInt((cat&&cat.numLaps)||"")||parseInt(cfg.numLaps)||1;
+};
+
+const getCHLaps=(rider,cfg)=>{
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  const v=parseInt((cat&&cat.chLaps)||"");
+  const nL=getNumLaps(rider,cfg);
+  return (v>0)?Math.min(v,nL):nL;
+};
+
+const lapHasCH=(rider,cfg,lap)=>lap<=getCHLaps(rider,cfg);
+
+const getCHTime=(rider,cfg,lap,ctrl)=>{
+  const k=`${lap}-${ctrl}`;
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  const cv=cat&&cat.chtimes?cat.chtimes[k]:undefined;if(cv&&!isNaN(parseFloat(cv)))return parseFloat(cv);
+  const gv=cfg.defaultCHTimes?cfg.defaultCHTimes[k]:undefined;if(gv&&!isNaN(parseFloat(gv)))return parseFloat(gv);
+  return 30;
+};
+
+const stageScores=(cfg,s,l,cat)=>{
+  // Per-category override first, then global, then default true
+  if(cat&&cat.stageScoring){
+    const v=cat.stageScoring[`s${s}-l${l}`];
+    if(v!==undefined)return!!v;
+  }
+  const v=cfg.stageScoring?cfg.stageScoring[`s${s}-l${l}`]:undefined;
+  return v===undefined?true:!!v;
+};
+
+const getActualStart=(rider,timing)=>{
+  const v=timing&&timing[rider.id]?timing[rider.id].actualStart:undefined;
+  return v?parseT(v):null;
+};
+
+const getStartPenalty=(rider,timing)=>{
+  const a=getActualStart(rider,timing);
+  return a!=null?Math.max(0,a-rider.startSecs):0;
+};
+
+const computeSchedule=(riders,cfg)=>{
+  if(!riders.length)return[];
+  const cats=cfg.categories||[];
+  const catOrd=cats.map(c=>c.name);
+  const groups={};catOrd.forEach(n=>{groups[n]=[];});
+  const unknown=[];
+  riders.forEach(r=>{
+    if(groups[r.categoria])groups[r.categoria].push(r);else unknown.push(r);
+  });
+  const ordered=[];
+  catOrd.forEach(name=>{
+    const cat=cats.find(c=>c.name===name);
+    const members=[...(groups[name]||[])];
+    members.sort((a,b)=>parseInt(a.dorsal,10)-parseInt(b.dorsal,10));
+    if(cat&&cat.reverseTop10){
+      const top=members.filter(r=>parseInt(r.dorsal,10)<=10);
+      const rest=members.filter(r=>parseInt(r.dorsal,10)>10);
+      top.reverse();
+      ordered.push(...top,...rest);
+    }else{ordered.push(...members);}
+  });
+  unknown.sort((a,b)=>parseInt(a.dorsal,10)-parseInt(b.dorsal,10));
+  ordered.push(...unknown);
+  const _st=parseT(cfg.startTime);const base=_st!=null?_st:(10*3600+15*60);
+  const cad=(parseInt(cfg.cadence)||1)*60;
+  const grp=Math.max(1,parseInt(cfg.groupSize)||1);
+  // Asignar horas de salida en cola continua: el cambio de categoría NO
+  // introduce un salto. Si la cadencia es 1 min y el grupo 2, salen 2 pilotos
+  // por minuto sin interrupción aunque cambie la categoría a mitad del minuto.
+  // El orden de las categorías se mantiene (lo decide `ordered` arriba).
+  // PAUSA ENTRE CATEGORÍAS (v3.50): cat.pausaTras = minutos de hueco entre el
+  // último piloto de esa categoría y el primero de la siguiente. Con pausa, la
+  // nueva categoría empieza franja propia (no comparte minuto con la anterior):
+  // último Senior 10:20, pausa 1 → primer Junior 10:22 (cadencia 1). Si entre
+  // dos categorías con pilotos hay alguna vacía, se suman sus pausas.
+  const posCat={};catOrd.forEach((n,i)=>{if(posCat[n]==null)posCat[n]=i;});
+  const pausaEntre=(a,b)=>{
+    const i=posCat[a],j=posCat[b];
+    if(i==null)return 0;
+    const fin=j==null?catOrd.length:j;
+    let m=0;
+    for(let k=i;k<fin;k++){const c=cats[k];const v=c?parseFloat(c.pausaTras):0;if(v>0)m+=v;}
+    return m;
+  };
+  const result=[];
+  let cursor=base,enFranja=0;
+  for(let idx=0;idx<ordered.length;idx++){
+    const rider=ordered[idx];
+    if(idx>0){
+      const prev=ordered[idx-1];
+      const cambio=prev.categoria!==rider.categoria;
+      const pausa=cambio?pausaEntre(prev.categoria,rider.categoria):0;
+      // cfg.catMinutoNuevo (v3.50): al cambiar de categoría se empieza franja
+      // nueva aunque la anterior no esté llena (el 7º de un grupo de 2 sale solo).
+      if(pausa>0||(cambio&&cfg.catMinutoNuevo)){cursor+=cad+Math.round(pausa*60);enFranja=0;}
+      // Sin pausa: avanza una franja de cadencia cada `grp` pilotos consecutivos
+      else if(enFranja>=grp){cursor+=cad;enFranja=0;}
+    }
+    enFranja++;
+    // Hora CONGELADA: con la carrera ya arrancada, la salida de un piloto no
+    // debe moverse aunque se reorganicen categorías. Si tiene _startFixed, ese
+    // valor manda y el cálculo automático se ignora para él.
+    const fija=rider._startFixed;
+    if(fija!=null&&!isNaN(parseInt(fija))){
+      const f=parseInt(fija);
+      result.push({...rider,startSecs:f,startStr:fmtHHMM(f)});
+      continue;
+    }
+    const offset=rider._startOffset||0;
+    result.push({...rider,startSecs:cursor+offset,startStr:fmtHHMM(cursor+offset)});
+  }
+  return result;
+};
+
+const getExpected=(rider,cfg,timing)=>{
+  const nL=getNumLaps(rider,cfg),nC=parseInt(cfg.numTimeControls)||1;
+  // Última vuelta CON control horario de ESTE piloto: puede diferir entre
+  // categorías y, con excepciones individuales, incluso entre pilotos.
+  const ultLapCH=Math.min(getCHLaps(rider,cfg),nL);
+  // ¿Se permite adelantarse sin penalizar en el último CH? Opción de carrera.
+  const sinPenalAdelanto=!!cfg.ultimoCHSinAdelanto;
+  const res={};
+  // Si hay hora real de salida, las horas previstas se recalculan desde ella
+  const _as=getActualStart(rider,timing);const base=_as!=null?_as:rider.startSecs;
+  let cur=base;
+  for(let lap=1;lap<=nL;lap++){
+    if(!lapHasCH(rider,cfg,lap))continue; // vuelta sin control horario: no entra en previstos
+    res[lap]={};
+    for(let ctrl=1;ctrl<=nC;ctrl++){
+      const secTime=getCHTime(rider,cfg,lap,ctrl)*60;
+      const exp=cur+secTime;
+      const stored=timing&&timing[rider.id]?timing[rider.id][`${lap}-${ctrl}`]:undefined;
+      const actualSecs=stored&&stored.actual?parseT(stored.actual):null;
+      // PENALIZACIÓN AL MINUTO (regla de enduro): entrar en cualquier segundo
+      // del minuto previsto NO penaliza. Si el CH es a las 10:22, entrar a las
+      // 10:22:00 o a las 10:22:59 es igual de puntual. Por eso comparamos
+      // minutos completos, truncando los segundos de ambas horas.
+      const alMinuto=(s)=>Math.floor(s/60)*60;
+      const diff=actualSecs!=null?(alMinuto(actualSecs)-alMinuto(exp)):0;
+      // ÚLTIMO CH DEL PILOTO: al terminar su carrera no tiene sentido hacerle
+      // esperar, así que si está activado se permite adelantarse sin penalizar
+      // (llegar tarde sí penaliza). Cada piloto tiene su propio "último CH":
+      // depende de sus vueltas con CH, que varían por categoría e incluso por
+      // excepción individual.
+      const esUltimoCH=(lap===ultLapCH&&ctrl===nC);
+      const penal=(esUltimoCH&&sinPenalAdelanto)?Math.max(0,diff):Math.abs(diff);
+      res[lap][ctrl]={expected:exp,actualSecs,actualStr:(stored&&stored.actual)||"",
+        penalty:penal,diff,entered:actualSecs!=null,ultimoCH:esUltimoCH};
+      // El encadenado de la siguiente previsión también va AL MINUTO: el
+      // reglamento cuenta el CH como el minuto en que se pasa, así que los
+      // segundos no deben arrastrarse ni desplazar las previsiones siguientes.
+      cur=actualSecs!=null?alMinuto(actualSecs):exp;
+    }
+  }
+  return res;
+};
+
+const checkAutoDsq=(rider,cfg,timing)=>{
+  const nL=getNumLaps(rider,cfg), nC=parseInt(cfg.numTimeControls)||1;
+  let cur=rider.startSecs; // siempre desde la hora prevista original
+  for(let lap=1;lap<=nL;lap++){
+    if(!lapHasCH(rider,cfg,lap))continue; // sin CH: no se evalúa descalificación por horario
+    for(let ctrl=1;ctrl<=nC;ctrl++){
+      cur+=getCHTime(rider,cfg,lap,ctrl)*60;
+      const stored=timing&&timing[rider.id]?timing[rider.id][`${lap}-${ctrl}`]:undefined;
+      const actualSecs=stored&&stored.actual?parseT(stored.actual):null;
+      if(actualSecs!=null){
+        const diff=actualSecs-cur;
+        if(diff>30*60){
+          return{autoDsq:true,reason:`CH${ctrl} V${lap}: +${Math.floor(diff/60)}'${(diff%60).toString().padStart(2,"0")}"`};
+        }
+      }
+    }
+  }
+  return{autoDsq:false,reason:""};
+};
+
+/* Tiempo de una crono tal y como cuenta para la clasificación: lo puesto a
+   mano (timing.crono_s_l) manda sobre lo que llegó del BACK o del decoder.
+   Devuelve el texto tal cual ("6:39.825") o null. Todas las vistas deben leer
+   el tiempo por aquí: la pestaña Clasificación lo leía directamente de
+   stageData y en Sotopalacios dio un total distinto del resto (dorsal 15). */
+const tiempoCronoRaw=(rider,s,l,timing,stageData)=>{
+  const t=timing&&timing[rider.id]&&timing[rider.id][`crono_${s}_${l}`];
+  const ov=t&&t.actual;
+  if(ov)return ov;
+  const sd=stageData&&stageData[`stage_${s}`];
+  return(sd&&sd[rider.dorsal]&&sd[rider.dorsal][l])||null;
+};
+
+/* Diferencias de cada piloto con el anterior clasificado y con el primero de
+   su categoría. Recibe las filas YA ORDENADAS como se enseñan, cada una con:
+     ranked  — si tiene posición (los que no, ni dan ni reciben diferencia)
+     total   — segundos, penalizaciones incluidas
+     hechos  — cronos completados (contarCronosHechos)
+   Solo se compara a pilotos con los MISMOS cronos hechos: entre uno que lleva
+   tres tramos y otro que lleva dos, la resta no significa nada. En ese caso, y
+   para el primero, la diferencia es null (se pinta «—»). Una diferencia
+   negativa tampoco tiene sentido en una lista ordenada: también null.
+   Devuelve [{ant, primero}] en segundos, en el mismo orden que la entrada. */
+const calcDiferencias=(filas)=>{
+  let prev=null, lider=null;
+  return filas.map(f=>{
+    if(!f||!f.ranked)return{ant:null,primero:null};
+    const cmp=(o)=>{
+      if(!o||o.hechos!==f.hechos)return null;
+      const d=f.total-o.total;
+      return d>=0?d:null;
+    };
+    const res=lider?{ant:cmp(prev),primero:cmp(lider)}:{ant:null,primero:null};
+    if(!lider)lider=f;
+    prev=f;
+    return res;
+  });
+};
+
+/* Cuántos cronos ha completado un piloto en total (sumando todas las vueltas).
+   Sirve para ordenar la clasificación con más finura que contando vueltas: dos
+   pilotos en la misma vuelta pueden llevar distinto número de cronos hechos, y
+   quien lleva más va por delante. */
+const contarCronosHechos=(rider,cfg,timing,stageData,nS)=>{
+  const nL=getNumLaps(rider,cfg);
+  const cat=(cfg.categories||[]).find(c=>c.name===rider.categoria);
+  let n=0;
+  for(let l=1;l<=nL;l++){
+    for(let s=1;s<=nS;s++){
+      if(!stageScores(cfg,s,l,cat))continue;
+      const ov=timing&&timing[rider.id]&&timing[rider.id][`crono_${s}_${l}`]&&timing[rider.id][`crono_${s}_${l}`].actual;
+      const raw=ov||(stageData&&stageData[`stage_${s}`]&&stageData[`stage_${s}`][rider.dorsal]&&stageData[`stage_${s}`][rider.dorsal][l]);
+      if(raw)n++;
+    }
+  }
+  return n;
+};
+
+// --- Estado ---
+const LS_SETUP="ch_setup", LS_QUEUE="ch_queue";
+let setup = (()=>{
+  const s = load(LS_SETUP);
+  if(!s) return null;
+  // La configuración caduca a las 10 horas: evita que al día siguiente (o en
+  // otra carrera) se abra con un CH antiguo y se fiche en el control equivocado.
+  const HORAS_VALIDEZ = 10;
+  if(s.guardadoEn && (Date.now()-s.guardadoEn) > HORAS_VALIDEZ*3600*1000){
+    return null;   // caducada: se pedirá de nuevo
+  }
+  return s;
+})();
+let confirmado = false;   // el comisario ha confirmado el control en esta sesión   // { controlId, nombre, stage, lap, ctrl, comisario }
+let queue = load(LS_QUEUE) || [];     // fichajes locales: { id, dorsal, horaMs, ts, synced }
+let clockOffset = 0;                  // ms a sumar al reloj local para obtener hora "oficial"
+let clockState = "pending";           // pending | ok | warn | bad
+let dorsalActual = "";
+let promptInstalar = null;   // evento de instalación (Chrome/Android)
+// Tema: "auto" sigue al sistema, o forzado a "claro"/"oscuro".
+// El claro es para sol directo; el oscuro para poca luz y ahorrar batería.
+let tema = (()=>{ try{return demoStorage.getItem("ch_tema")||"auto";}catch(e){return "auto";} })();
+let modoManual = false;      // pantalla de introducir hora a mano
+let horaManual = "";         // dígitos tecleados (HHMM)
+let ultimoError = "";  // texto del último fallo de subida (para diagnóstico)
+let setupPrevio = null;  // configuración anterior, para no reescribirla al corregir
+
+function load(k){ try{return JSON.parse(demoStorage.getItem(k));}catch(e){return null;} }
+// Si demoStorage falla (memoria llena, modo privado, ajustes del navegador) la
+// cola no se guarda y al recargar desaparece todo lo fichado. Antes se callaba.
+let falloAlmacen="";
+function save(k,v){
+  try{
+    demoStorage.setItem(k,JSON.stringify(v));
+    if(falloAlmacen){ falloAlmacen=""; }
+    return true;
+  }catch(e){
+    falloAlmacen=String(e&&e.message||e||"no se pudo guardar");
+    return false;
+  }
+}
+
+// --- Sincronización de reloj (opción B) ---
+// Firebase da un offset estimado entre el reloj local y el del servidor en
+// /.info/serverTimeOffset. Lo usamos para corregir cada fichaje.
+function initClockSync(){
+  if(!db) { clockState="bad"; return; }
+  db.ref(".info/serverTimeOffset").on("value", snap=>{
+    const off = snap.val();
+    if(typeof off === "number"){
+      // Si Firebase nos manda el offset, es que hay conexión REAL.
+      ultimaLecturaFB=Date.now();
+      clockOffset = off;
+      const abs=Math.abs(off);
+      clockState = abs<2000 ? "ok" : abs<10000 ? "warn" : "bad";
+      render();
+    }
+  });
+}
+// Si al minuto no ha llegado la hora del servidor, deja de ser «esperando» y
+// pasa a ser «no se ha podido comprobar». Un aviso que se queda en «espera»
+// indefinida se lee como que ya se arreglará solo, y no se va a arreglar.
+setTimeout(()=>{ if(clockState==="pending"){ clockState="bad"; render(); } }, 60000);
+
+function horaOficialMs(){ return Date.now() + clockOffset; }
+function fmtHora(ms){
+  const d=new Date(ms); const p=(n,w=2)=>String(n).padStart(w,"0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function fmtHoraMs(ms){
+  const d=new Date(ms); const p=(n,w=2)=>String(n).padStart(w,"0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(),3)}`;
+}
+
+// --- Fichar un paso ---
+function fichar(dorsal, horaMs, varios){
+  const d=String(dorsal).trim();
+  if(!d) return;
+  const f={ id: (Date.now()+"_"+Math.random().toString(36).slice(2,7)),
+            dorsal:d, horaMs, ts:Date.now(), synced:false,
+            clockState, clockOffsetMs: Math.round(clockOffset),
+            // Solo para el registro local (exportar): no se suben, el cuerpo
+            // que va a Firebase se arma campo a campo en sincronizar().
+            ctrl:setup?setup.ctrl:null, codigo:setup?setup.codigo:null };
+  queue.unshift(f);
+  save(LS_QUEUE, queue);
+  if(varios) return;   // confirmarSeleccion avisa, sube y repinta una sola vez
+  toast(`✓ ${d}  ${fmtHora(horaMs).slice(0,5)}`);
+  dorsalActual="";
+  // Si estaba marcado en la lista de previstos, ya no hace falta.
+  try{ const r=(liveRiders||[]).find(x=>String(x.dorsal)===d); if(r) selPrev.delete(r.id); }catch(e){}
+  sincronizar();
+  render();
+}
+
+// --- Sincronización de la cola a Firebase ---
+let syncing=false;
+let camposRelojOk=true;    // ¿aceptan las reglas los campos del reloj?
+let avisadoReglas=false;
+function sincronizar(){
+  // No exigimos `connected`: intentamos siempre. Si hay red, sube; si no, falla
+  // y se reintenta luego. Evita bloquearse por un indicador con falsos negativos.
+  if(!db || syncing || !setup || !autenticado) return;
+  const pend = queue.filter(f=>!f.synced && !f.anulado);
+  if(!pend.length) return;
+  syncing=true;
+  const ref = db.ref("chFichajes/"+encodeURIComponent(setup.codigo||"sincodigo")+"/"+setup.controlId);
+  const cuerpo=(f,conReloj)=>{
+    const base={
+      dorsal:f.dorsal, horaMs:f.horaMs,
+      ctrl:setup.ctrl||null,
+      comisario:setup.comisario||null, anulado:false,
+      ts: firebase.database.ServerValue.TIMESTAMP,
+    };
+    if(!conReloj) return base;
+    return Object.assign(base,{
+      clockState: f.clockState || clockState,
+      clockOffsetMs: Math.round(typeof f.clockOffsetMs==="number"?f.clockOffsetMs:clockOffset),
+    });
+  };
+  const subir=(conReloj)=>Promise.all(pend.map(f=>
+    ref.push(cuerpo(f,conReloj)).then(refPush=>{ f.synced=true; f.pushId=refPush.key; })));
+
+  subir(camposRelojOk).then(()=>{
+    ultimaSubidaOk=Date.now();
+    ultimoError="";
+    save(LS_QUEUE, queue); syncing=false; render();
+  }).catch(e=>{
+    // Primer fallo con los campos nuevos: puede ser que las reglas todavía no
+    // los admitan. Se reintenta una vez sin ellos antes de dar el error por
+    // bueno. Si esto salva la subida, se dice en pantalla: significa que hay
+    // que pegar las reglas nuevas en la consola de Firebase.
+    if(camposRelojOk){
+      camposRelojOk=false;
+      return subir(false).then(()=>{
+        ultimaSubidaOk=Date.now();
+        ultimoError="";
+        if(!avisadoReglas){
+          avisadoReglas=true;
+          errorReglas="El servidor no admite el estado del reloj en los fichajes. "+
+            "Se han subido igualmente, pero sin ese dato: faltan por aplicar las reglas nuevas de Firebase.";
+        }
+        save(LS_QUEUE, queue); syncing=false; render();
+      }).catch(e2=>{ throw e2; });
+    }
+    throw e;
+  }).catch(e=>{
+    // Guardamos el error REAL para poder diagnosticar. Con el código en la ruta
+    // ya no existe "código incorrecto": un fallo aquí suele significar que las
+    // reglas de Firebase no están publicadas o rechazan algún campo.
+    ultimoError=String(e.message||e||"error desconocido");
+    console.warn("sync",ultimoError); syncing=false; render();
+  });
+}
+// Reintento periódico de sincronización (por si vuelve la cobertura)
+setInterval(sincronizar, 8000);
+
+// --- Latido de presencia: el central sabe que este CH está vivo ---
+// Publica en chPresencia/{controlId} cada 20s: nombre, comisario, últimos datos.
+function pushPresencia(){
+  // Aquí ponía `!connected`. Ese indicador da falsos negativos —por eso existe
+  // hayConexion()— y el efecto era que el central pintaba en rojo un CH que
+  // estaba fichando y subiendo sin problema. Se comprobó: 1 fichaje subido, 0
+  // latidos enviados, y el comisario viendo "En línea y sincronizado".
+  if(!db || !hayConexion() || !setup) return;
+  const pend = queue.filter(f=>!f.synced && !f.anulado).length;
+  const ultimo = queue.length ? queue[0].horaMs : null;
+  db.ref("chPresencia/"+encodeURIComponent(setup.codigo||"sincodigo")+"/"+setup.controlId).set({
+    controlId:setup.controlId, nombre:setup.nombre||"",
+    stage:setup.stage||null, ctrl:setup.ctrl||null, comisario:setup.comisario||null,
+    lastSeen: firebase.database.ServerValue.TIMESTAMP,
+    totalFichajes: queue.length, pendientes: pend,
+    ultimoFichajeMs: ultimo,
+    clockState, clockOffsetMs: Math.round(clockOffset),
+  }).catch(()=>{});
+}
+setInterval(pushPresencia, 20000);
+
+function anular(id){
+  const f=queue.find(x=>x.id===id); if(!f) return;
+  if(!confirm(`¿Anular el fichaje del dorsal ${f.dorsal} (${fmtHora(f.horaMs).slice(0,5)})?\n\nSe borrará también del programa.`))return;
+
+  // Si nunca llegó a subir, no hay nada que deshacer en el servidor.
+  if(!f.synced || !db || !setup){
+    queue=queue.filter(x=>x.id!==id);
+    save(LS_QUEUE,queue); render();
+    return;
+  }
+
+  // Si sí subió, NO se quita de la lista hasta que el servidor lo confirme.
+  // Antes se quitaba siempre: el comisario veía su lista limpia mientras el
+  // fichaje seguía en el programa, con su hora y su penalización, y el único
+  // aviso era un mensaje de 1,4 s. Ahora se marca como "anulando" y el
+  // reintento de cada 8 s insiste hasta conseguirlo.
+  f.anulado=true;
+  f.anulPend=true;
+  save(LS_QUEUE,queue);
+  render();
+  intentarAnulaciones();
+}
+
+// Borrado en el servidor de los fichajes marcados para anular. Se reintenta
+// junto con la subida, así que una anulación hecha sin cobertura acaba
+// cumpliéndose sola cuando vuelve la señal.
+let anulando=false;
+let errorAnular="";
+let errorReglas="";   // las reglas de Firebase no admiten el estado del reloj
+function intentarAnulaciones(){
+  if(!db || anulando || !setup || !autenticado) return;
+  const pend=queue.filter(f=>f.anulado && f.anulPend && f.synced);
+  if(!pend.length) return;
+  anulando=true;
+  const base="chFichajes/"+encodeURIComponent(setup.codigo||"sincodigo")+"/"+setup.controlId;
+
+  const borrarUno=(f)=>{
+    // Caso normal: conocemos el identificador del registro subido.
+    if(f.pushId) return db.ref(base+"/"+f.pushId).remove().then(()=>{ f.anulPend=false; });
+    // Fichajes subidos con versiones anteriores: no guardaban el identificador.
+    // Se localizan por dorsal + hora exacta.
+    return db.ref(base).once("value").then(snap=>{
+      const todos=snap.val()||{};
+      const claves=Object.keys(todos).filter(k=>{
+        const r=todos[k]||{};
+        return String(r.dorsal)===String(f.dorsal) && Math.abs((r.horaMs||0)-f.horaMs)<1000;
+      });
+      // No está: o nunca llegó, o ya se borró. En ambos casos, cumplido.
+      if(!claves.length){ f.anulPend=false; return; }
+      return Promise.all(claves.map(k=>db.ref(base+"/"+k).remove())).then(()=>{ f.anulPend=false; });
+    });
+  };
+
+  Promise.all(pend.map(f=>borrarUno(f).catch(e=>{
+    // Ojo: NO se reutiliza ultimoError. Ese banner dice "no se pudieron subir
+    // los fichajes" y aquí el problema es el contrario; el aviso propio de la
+    // anulación va aparte.
+    errorAnular=String(e.message||e);
+  }))).then(()=>{
+    const hechas=pend.filter(f=>!f.anulPend).length;
+    // Solo desaparecen de la lista las que el servidor ha confirmado.
+    queue=queue.filter(f=>!(f.anulado && !f.anulPend));
+    save(LS_QUEUE,queue);
+    anulando=false;
+    if(hechas){ errorAnular=""; toast(hechas===1?"✓ Anulado también en el programa":`✓ ${hechas} anulados en el programa`); }
+    render();
+  });
+}
+setInterval(intentarAnulaciones, 8000);
+
+// --- Tema claro/oscuro ---
+function temaEfectivo(){
+  if(tema==="claro")return "claro";
+  if(tema==="oscuro")return "oscuro";
+  // auto: seguimos la preferencia del sistema
+  try{ return window.matchMedia("(prefers-color-scheme: light)").matches?"claro":"oscuro"; }
+  catch(e){ return "oscuro"; }
+}
+function aplicarTema(){
+  document.body.classList.toggle("claro", temaEfectivo()==="claro");
+  const meta=document.querySelector('meta[name="theme-color"]');
+  if(meta)meta.setAttribute("content", temaEfectivo()==="claro"?"#f2f4f7":"#0c0c0f");
+}
+window.cambiarTema=function(){
+  // Ciclo: auto → claro → oscuro → auto
+  tema = tema==="auto" ? "claro" : tema==="claro" ? "oscuro" : "auto";
+  try{ demoStorage.setItem("ch_tema",tema); }catch(e){}
+  aplicarTema(); render();
+};
+function iconoTema(){
+  return tema==="claro" ? "☀️" : tema==="oscuro" ? "🌙" : "🌗";
+}
+function nombreTema(){
+  return tema==="claro" ? "Claro (sol)" : tema==="oscuro" ? "Oscuro" : "Automático";
+}
+// Si está en automático, reaccionar a los cambios del sistema
+try{
+  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{
+    if(tema==="auto"){aplicarTema();render();}
+  });
+}catch(e){}
+
+// --- UI ---
+function toast(msg){
+  let t=document.getElementById("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; t.className="toast"; document.body.appendChild(t); }
+  t.textContent=msg; t.classList.add("show");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"), 1400);
+}
+
+function pantallaSetup(){
+  const s=setup||setupPrevio||{};
+  return `
+  <div class="wrap">
+    <header><div><div class="t">Control Horario</div><div class="sub">Configuración inicial</div></div></header>
+    <main class="setup">
+      ${htmlCarreraPublicada()}
+      <div class="card">
+        <label>Código de acceso</label>
+        <input id="s_codigo" type="text" inputmode="numeric" placeholder="El que te den hoy" value="${s.codigo||''}">
+        <div class="mini" style="margin-top:0.3rem">Te lo facilita la organización el día de la carrera. Sin él, los fichajes no llegan al programa.</div>
+      </div>
+      <div class="card">
+        <label>Número de CH</label>
+        <input id="s_ctrl" type="number" min="1" max="20" placeholder="1" value="${s.ctrl||''}">
+        <div class="mini" style="margin-top:0.5rem">Identifica este control en toda la carrera. La vuelta NO se elige: el programa la deduce solo, para evitar errores cuando llegan pilotos de vueltas distintas mezclados.</div>
+      </div>
+      <div class="card">
+        <label>Tu nombre (opcional)</label>
+        <input id="s_comisario" placeholder="Ej: Juan" value="${s.comisario||''}">
+      </div>
+      <button class="btnPasa" style="font-size:1.2rem;padding:1rem" onclick="guardarSetup()">Empezar a fichar →</button>
+      ${promptInstalar?`<button class="btnSec" onclick="instalarApp()" style="width:100%">📲 Instalar como app</button>`:''}
+      <button class="btnSec" style="width:100%" onclick="cambiarTema()">${iconoTema()} Tema: ${nombreTema()}</button>
+      ${queue.length?`<button class="btnSec" style="width:100%" onclick="exportarFichajes()">⬇ Exportar los ${queue.length} fichajes guardados en este móvil</button>`:''}
+      ${(clockState==="bad"||clockState==="pending")?`<div class="card" style="border-color:var(--amber)">
+        <div style="color:var(--amber);font-weight:700;font-size:0.8rem">🕐 Reloj sin sincronizar</div>
+        <div class="mini" style="margin-top:0.3rem">Se fichará con la hora del teléfono. Antes de empezar, comprueba que la hora del móvil es la correcta (mejor en automático).</div>
+      </div>`:''}
+      <div class="mini" style="text-align:center">Reloj: ${clockBadge()} · v${APP_VER}</div>
+    </main>
+  </div>`;
+}
+
+function clockBadge(){
+  const map={ ok:['syncok','✓ sincronizado'], warn:['syncwarn','⚠ desfase moderado'],
+              bad:['syncbad','✗ sin sincronizar'], pending:['syncwarn','sincronizando…'] };
+  const [cls,txt]=map[clockState]||map.pending;
+  const off = clockState==='ok'||clockState==='warn'||clockState==='bad' ? ` (${clockOffset>=0?'+':''}${(clockOffset/1000).toFixed(1)}s)` : '';
+  return `<span class="${cls}">${txt}${off}</span>`;
+}
+
+
+function pantallaConfirmar(){
+  const s=setup||{};
+  const pend=queue.filter(f=>!f.synced).length;
+  const hace=s.guardadoEn?Math.round((Date.now()-s.guardadoEn)/60000):null;
+  return `
+  <div class="wrap">
+    <header><div><div class="t">Confirma tu control</div><div class="sub">Antes de empezar a fichar</div></div></header>
+    <main class="setup">
+      <div class="card" style="border-color:var(--amber)">
+        <div style="text-align:center;padding:0.5rem 0">
+          <div style="font-size:2.2rem;font-weight:900;color:var(--amber);letter-spacing:0.05em">CH${s.ctrl||"?"}</div>
+          ${s.comisario?`<div class="mini" style="margin-top:0.3rem">Comisario: ${s.comisario}</div>`:""}
+          <div class="mini" style="margin-top:0.3rem">Código: <b style="font-family:monospace;letter-spacing:0.1em;color:var(--cyan)">${s.codigo||"—"}</b></div>
+          ${hace!=null?`<div class="mini">Configurado hace ${hace<60?hace+" min":Math.round(hace/60)+" h"}</div>`:""}
+        </div>
+      </div>
+      <div class="card">
+        <div class="mini" style="text-align:center;line-height:1.5">
+          Carrera activa:<br>
+          <b style="color:var(--cyan);font-size:0.85rem">${carreraActiva||"— ninguna —"}</b>
+        </div>
+        ${pend>0?`<div class="mini" style="text-align:center;color:var(--amber);margin-top:0.4rem">⏳ ${pend} fichaje(s) pendiente(s) de subir</div>`:""}
+      </div>
+      <button class="btnPasa" style="font-size:1.15rem;padding:1rem" onclick="confirmarControl()">
+        ✓ Sí, soy el CH${s.ctrl||"?"} — empezar
+      </button>
+      <button class="btnSec" style="width:100%" onclick="cambiarControl()">⚙ No, cambiar de control</button>
+      <div class="mini" style="text-align:center">Reloj: ${clockBadge()} · v${APP_VER}</div>
+    </main>
+  </div>`;
+}
+
+
+function pantallaHoraManual(){
+  const d=horaManual.padEnd(4,"·");
+  const hh=d.slice(0,2), mm=d.slice(2,4);
+  const valido=horaManual.length===4 && parseInt(horaManual.slice(0,2))<24 && parseInt(horaManual.slice(2,4))<60;
+  const tecla=(t)=>`<button class="tecla" onclick="teclaHora('${t}')">${t}</button>`;
+  return `
+  <div class="wrap">
+    <header>
+      <div><div class="t">Hora manual</div><div class="sub">Dorsal ${dorsalActual||"—"} · CH${setup.ctrl||"?"}</div></div>
+    </header>
+    <main>
+      <div class="card" style="text-align:center">
+        <label style="text-align:center">Hora de paso (hoy)</label>
+        <div style="font-size:3.2rem;font-weight:900;font-family:monospace;letter-spacing:0.06em;
+             color:${valido?'var(--green)':'var(--text)'};padding:0.4rem 0">
+          ${hh}:${mm}
+        </div>
+        <div class="mini">Solo horas y minutos — los segundos no cuentan</div>
+      </div>
+      <div class="teclado">
+        ${["1","2","3","4","5","6","7","8","9"].map(tecla).join("")}
+        <button class="tecla limpiar" onclick="teclaHora('clr')" title="Borrar la hora entera">C</button>
+        ${tecla("0")}
+        <button class="tecla borrar" onclick="teclaHora('del')" title="Borrar un dígito">←</button>
+      </div>
+      <button class="btnPasa" style="font-size:1.25rem;padding:1rem" onclick="confirmarHoraManual()" ${valido?"":"disabled"}>
+        ✓ Confirmar ${valido?hh+":"+mm:""}
+      </button>
+      <button class="btnSec" style="width:100%" onclick="cancelarHoraManual()">Cancelar</button>
+    </main>
+  </div>`;
+}
+
+// ═══ PILOTOS PREVISTOS (v3.3) ══════════════════════════════════════════════
+// La app lee del programa central (nodo live/, público) los pilotos, su
+// configuración y las horas de CH ya registradas, y con el NÚCLEO DE CÁLCULO
+// —el mismo del programa— calcula a qué minuto le toca a cada uno pasar por
+// ESTE control. Es dinámico: el núcleo encadena desde el minuto REAL de paso
+// por el control anterior, así que si un piloto llegó 2 min tarde al CH1, en
+// el CH2 aparece 2 min más tarde. Lo fichado en este móvil cuenta al momento,
+// sin esperar a que el programa lo publique.
+// Sin cobertura se usa lo último descargado (se guarda en el móvil). Si del
+// control anterior no se sabe nada, la previsión es la del horario teórico y
+// se marca con «≈».
+// La app NO ficha sola: el comisario marca a los que pasan y confirma.
+const LS_LIVE="ch_live";
+let liveRiders=null, liveTiming=null, liveConfig=null, liveTs=0;
+(()=>{ const c=load(LS_LIVE); if(c&&c.config){ liveConfig=c.config; liveRiders=c.riders||null; liveTiming=c.timing||{}; liveTs=c.ts||0; } })();
+let guardarLiveTimer=null;
+function guardarLive(){
+  clearTimeout(guardarLiveTimer);
+  guardarLiveTimer=setTimeout(()=>{ save(LS_LIVE,{config:liveConfig,riders:liveRiders,timing:liveTiming,ts:liveTs}); },1500);
+}
+function escucharPrevistos(){
+  if(!db) return;
+  const fichando=()=>setup&&confirmado&&!modoManual;
+  db.ref("live/riders").on("value",sn=>{
+    ultimaLecturaFB=Date.now();
+    const v=sn.val(); liveRiders=v?(Array.isArray(v)?v.filter(Boolean):Object.values(v)):null;
+    liveTs=Date.now(); guardarLive(); if(fichando()) render();
+  },()=>{});
+  db.ref("live/timing").on("value",sn=>{
+    ultimaLecturaFB=Date.now();
+    liveTiming=sn.val()||{}; liveTs=Date.now(); guardarLive(); if(fichando()) render();
+  },()=>{});
+}
+let selPrev=new Set();      // ids de piloto marcados en la lista de previstos
+let vistaAusentes=false;    // pantalla «ya les tocaba y no constan»
+const segDelDia=(ms)=>{ const d=new Date(ms); return d.getHours()*3600+d.getMinutes()*60+d.getSeconds(); };
+const hhmm=(sec)=>{ const m=Math.floor(sec/60); return String(Math.floor(m/60)%24).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); };
+
+// → {estado:"ok", items:[{r,lap,exp,teorico}], pasados} o {estado:<motivo>}
+function calcularPrevistos(){
+  if(!setup) return {estado:"sinsetup"};
+  if(!liveConfig||!Array.isArray(liveRiders)||!liveRiders.length) return {estado:"sindatos"};
+  if(liveConfig.date&&liveConfig.date!==hoyISO()) return {estado:"otrodia"};
+  const cfg=liveConfig, ctrl=parseInt(setup.ctrl), nC=parseInt(cfg.numTimeControls)||1;
+  if(!ctrl||ctrl>nC) return {estado:"chfuera"};
+  // Lo fichado en ESTE móvil hoy para este CH, por dorsal
+  const hoy=hoyISO();
+  const locales={};
+  queue.forEach(f=>{
+    if(f.anulado||String(f.ctrl||setup.ctrl)!==String(ctrl)) return;
+    const d=new Date(f.horaMs), p=n=>String(n).padStart(2,"0");
+    if(`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`!==hoy) return;
+    (locales[String(f.dorsal)]=locales[String(f.dorsal)]||[]).push(f);
+  });
+  const timing=liveTiming||{};
+  const items=[]; let pasados=0;
+  computeSchedule(liveRiders,cfg).forEach(r=>{
+    if(r.dns) return;
+    const rt=timing[r.id]||{};
+    if(rt.status==="dnf"||rt.status==="dsq") return;
+    let tim=timing;
+    const loc=(locales[String(r.dorsal)]||[]).slice().sort((a,b)=>a.horaMs-b.horaMs);
+    if(loc.length){
+      // Las horas de este móvil que el programa aún no tiene se colocan en las
+      // primeras vueltas libres de este CH (igual que hará el programa).
+      const t2={...rt}, nL=getNumLaps(r,cfg);
+      const yaMin=new Set();
+      for(let l=1;l<=nL;l++){ const v=t2[`${l}-${ctrl}`]; if(v&&v.actual) yaMin.add(Math.floor(parseT(v.actual)/60)); }
+      loc.forEach(f=>{
+        const m=Math.floor(segDelDia(f.horaMs)/60);
+        if(yaMin.has(m)) return;               // ya está en el programa
+        for(let l=1;l<=nL;l++){
+          if(!lapHasCH(r,cfg,l)) continue;
+          const k=`${l}-${ctrl}`;
+          if(!(t2[k]&&t2[k].actual)){ t2[k]={...(t2[k]||{}),actual:fmtHora(f.horaMs)}; yaMin.add(m); break; }
+        }
+      });
+      tim={...timing,[r.id]:t2};
+    }
+    const ex=getExpected(r,cfg,tim);
+    const laps=Object.keys(ex).map(Number).sort((a,b)=>a-b);
+    for(let i=0;i<laps.length;i++){
+      const lap=laps[i], c=ex[lap][ctrl];
+      if(!c) continue;
+      if(c.entered){ pasados++; continue; }
+      // ¿Se sabe por dónde pasó en el control anterior de la cadena?
+      let ant=null;
+      if(ctrl>1) ant=ex[lap][ctrl-1];
+      else if(i>0) ant=ex[laps[i-1]][nC];
+      items.push({r,lap,exp:c.expected,teorico:!!(ant&&!ant.entered)});
+      break;   // solo su próximo paso por este CH
+    }
+  });
+  items.sort((a,b)=>a.exp-b.exp||parseInt(a.r.dorsal)-parseInt(b.r.dorsal));
+  return {estado:"ok",items,pasados};
+}
+
+function chipPrevisto(it,clase){
+  const sel=selPrev.has(it.r.id);
+  // «APELLIDOS, NOMBRE» → los apellidos, que es como se les conoce en la tarjeta.
+  const fn=String(it.r.fullName||"");
+  const nombre=(fn.includes(",")?fn.split(",")[0]:fn).trim().split(/\s+/).slice(0,2).join(" ");
+  return `<button class="chip ${clase}${sel?" sel":""}" onclick="selPrevisto('${String(it.r.id).replace(/'/g,"")}')">
+      <div class="cd">${esc(it.r.dorsal)}${sel?" ✓":""}</div>
+      <div class="cn">${it.teorico?"≈ ":""}V${it.lap} · ${esc(nombre)}</div>
+    </button>`;
+}
+
+function htmlPrevistos(){
+  const P=calcularPrevistos();
+  if(P.estado!=="ok"){
+    const txt={sindatos:"Sin datos de la carrera todavía: con cobertura se descargan solos.",
+      otrodia:"La carrera publicada no es de hoy: no se pueden prever los pasos.",
+      chfuera:`La carrera publicada no tiene el CH${setup.ctrl}.`}[P.estado];
+    return txt?`<div class="card prev"><div class="mini">👀 Previstos: ${txt}</div></div>`:"";
+  }
+  const ahora=segDelDia(horaOficialMs()), M=Math.floor(ahora/60);
+  const enMin=(it)=>Math.floor(it.exp/60);
+  // Retrasados a mano: los de los últimos 10 min. Los anteriores siguen en
+  // «Faltan» (con lo que la lista de arriba no se come la pantalla).
+  const retrasados=P.items.filter(it=>enMin(it)<M&&M-enMin(it)<=10);
+  const faltan=P.items.filter(it=>enMin(it)<M);
+  const ya=P.items.filter(it=>enMin(it)===M);
+  const prox1=P.items.filter(it=>enMin(it)===M+1), prox2=P.items.filter(it=>enMin(it)===M+2);
+  const bloque=(titulo,et,lista,clase,color)=>lista.length?`
+      <div class="prevMin" style="color:${color}">${titulo} <span class="et">${et}</span></div>
+      <div class="chips">${lista.map(it=>chipPrevisto(it,clase)).join("")}</div>`:"";
+  const n=selPrev.size;
+  const antiguo=liveTs&&(Date.now()-liveTs>10*60*1000);
+  return `<div class="card prev">
+      <div class="prevHead">
+        <label style="margin:0">Previstos en CH${setup.ctrl}</label>
+        <button class="btnSec" style="padding:0.3rem 0.55rem;font-size:0.7rem" onclick="verAusentes(true)">📋 Faltan ${faltan.length}</button>
+      </div>
+      <div class="mini">Han pasado ${P.pasados} · ${faltan.length?`<b style="color:var(--amber)">${faltan.length} ya deberían haber pasado</b>`:"ninguno pendiente"}${antiguo?` · <span style="color:var(--amber)">datos de hace ${Math.round((Date.now()-liveTs)/60000)} min</span>`:""}</div>
+      ${ya.length?bloque(hhmm(M*60),"ahora",ya,"","var(--green)"):`<div class="prevMin" style="color:var(--green)">${hhmm(M*60)} <span class="et">ahora · nadie previsto</span></div>`}
+      ${bloque("Retrasados","últimos 10 min",retrasados,"tarde","var(--amber)")}
+      ${faltan.length>retrasados.length?`<div class="mini" style="margin-top:0.25rem">y ${faltan.length-retrasados.length} más de hace más de 10 min → <a href="#" onclick="verAusentes(true);return false" style="color:var(--cyan)">Faltan</a></div>`:""}
+      ${bloque(hhmm((M+1)*60),"siguiente",prox1,"prox","var(--muted)")}
+      ${bloque(hhmm((M+2)*60),"",prox2,"prox","var(--muted)")}
+      ${n?`<button class="btnPasa" style="margin-top:0.6rem;font-size:1.3rem;padding:0.9rem" onclick="confirmarSeleccion()">✓ PASAN ${n}: ${[...selPrev].map(id=>{const r=liveRiders.find(x=>x.id===id);return r?r.dorsal:"?";}).join(", ")}</button>
+             <button class="btnSec" style="width:100%;margin-top:0.35rem;font-size:0.75rem" onclick="limpiarSeleccion()">Desmarcar</button>`:""}
+      ${P.items.some(it=>it.teorico)?`<div class="mini" style="margin-top:0.4rem">≈ = sin dato del control anterior: según horario.</div>`:""}
+    </div>`;
+}
+
+function pantallaAusentes(){
+  const P=calcularPrevistos();
+  const ahora=segDelDia(horaOficialMs()), M=Math.floor(ahora/60);
+  const lista=P.estado==="ok"?P.items.filter(it=>Math.floor(it.exp/60)<M):[];
+  return `<div class="wrap">
+    <header><div><div class="t">Faltan en CH${setup.ctrl}</div><div class="sub">Ya les tocaba pasar y no constan</div></div></header>
+    <main>
+      <div class="card">
+        <div class="mini" style="line-height:1.5">Repásalos con tu tarjeta. Si alguno pasó y no se fichó, toca «Fichar con su hora» y escribe la hora a la que pasó. Los que no aparezcan es que ya constan o no les toca todavía.</div>
+      </div>
+      <div class="card">
+        ${lista.length?lista.map(it=>{
+          const tarde=M-Math.floor(it.exp/60);
+          return `<div class="ausente">
+            <span class="d">${esc(it.r.dorsal)}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:0.8rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.r.fullName||"")}</div>
+              <div class="mini">V${it.lap} · su minuto ${it.teorico?"≈ ":""}${hhmm(it.exp)} · hace ${tarde} min${tarde>30?' · <b style="color:var(--red)">fuera de control</b>':""}</div>
+            </div>
+            <button class="btnSec" style="padding:0.35rem 0.5rem;font-size:0.7rem" onclick="ficharAusente('${esc(it.r.dorsal)}')">Fichar con su hora</button>
+          </div>`;}).join(""):`<div class="mini">Nadie pendiente: todos los que debían pasar ya constan.</div>`}
+      </div>
+      <button class="btnSec" style="width:100%" onclick="verAusentes(false)">← Volver</button>
+    </main></div>`;
+}
+
+// Texto bajo el dorsal tecleado: quién es, cuál es su minuto y si llega
+// adelantado o tarde. Útil también para decirle al piloto que espere.
+function textoPista(dorsal){
+  const d=String(dorsal||"").trim();
+  if(!d) return "";
+  const P=calcularPrevistos();
+  if(P.estado!=="ok") return "";
+  const r=liveRiders.find(x=>String(x.dorsal)===d);
+  if(!r) return `<span style="color:var(--amber)">⚠ El dorsal ${esc(d)} no está en la carrera publicada</span>`;
+  const it=P.items.find(x=>x.r.id===r.id);
+  const nombre=esc(r.fullName||"")+(r.categoria?` · ${esc(r.categoria)}`:"");
+  if(!it) return `${nombre} · <span style="color:var(--amber)">no le queda ningún paso por este CH</span>`;
+  const dif=Math.floor(segDelDia(horaOficialMs())/60)-Math.floor(it.exp/60);
+  const estado=dif===0?`<b style="color:var(--green)">en su minuto</b>`
+    :dif<0?`<b style="color:var(--amber)">llega ${-dif} min ADELANTADO</b>`
+    :`<b style="color:var(--amber)">llega ${dif} min tarde</b>`;
+  return `${nombre} · V${it.lap} · su minuto ${it.teorico?"≈ ":""}${hhmm(it.exp)} → ${estado}`;
+}
+window.pistaDorsal=function(){ const el=document.getElementById("pistaDorsal"); if(el) el.innerHTML=textoPista(dorsalActual); };
+window.selPrevisto=function(id){ if(selPrev.has(id)) selPrev.delete(id); else selPrev.add(id); render(); };
+window.limpiarSeleccion=function(){ selPrev.clear(); render(); };
+window.confirmarSeleccion=function(){
+  if(!selPrev.size) return;
+  const horaMs=horaOficialMs();
+  const dorsales=[...selPrev].map(id=>{const r=(liveRiders||[]).find(x=>x.id===id);return r?String(r.dorsal):null;}).filter(Boolean);
+  selPrev.clear();
+  dorsales.forEach(d=>fichar(d,horaMs,true));
+  toast(`✓ ${dorsales.join(", ")}  ${fmtHora(horaMs).slice(0,5)}`);
+  sincronizar(); render();
+};
+window.verAusentes=function(v){ vistaAusentes=!!v; render(); };
+window.ficharAusente=function(dorsal){
+  vistaAusentes=false; dorsalActual=String(dorsal);
+  window.onPasaManual();
+};
+// Cada minuto: repintar la lista y, si en el minuto nuevo hay pilotos
+// previstos, vibrar (en los móviles que lo permiten).
+let minutoPintado=null;
+setInterval(()=>{
+  if(!setup||!confirmado) return;
+  const M=Math.floor(segDelDia(horaOficialMs())/60);
+  if(minutoPintado===null){ minutoPintado=M; return; }
+  if(M===minutoPintado) return;
+  minutoPintado=M;
+  if(modoManual) return;
+  // Selección del minuto anterior que no se confirmó: se conserva.
+  render();
+  try{
+    const P=calcularPrevistos();
+    if(P.estado==="ok"&&P.items.some(it=>Math.floor(it.exp/60)===M)&&navigator.vibrate) navigator.vibrate([180,90,180]);
+  }catch(e){}
+},1000);
+
+function pantallaFichar(){
+  const pend = queue.filter(f=>!f.synced && !f.anulado).length;
+  const anulPend = queue.filter(f=>f.anulPend).length;
+  const online = hayConexion();
+  return `
+  <div class="wrap">
+    <header>
+      <div style="min-width:0">
+        <div class="t">CH${setup.ctrl||'?'}</div>
+        <div class="sub">${setup.comisario?setup.comisario+' · ':''}cód ${setup.codigo||'—'} · v${APP_VER}</div>
+        <div class="sub" style="color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${carreraActiva?('🏁 '+carreraActiva):'<span style="color:var(--amber)">⚠ sin carrera activa</span>'}
+        </div>
+      </div>
+      <div class="clock"><div class="h" id="liveclock">${fmtHora(horaOficialMs())}</div>
+        <div class="s">${clockBadge()}</div></div>
+      <button class="btnTema" onclick="cambiarTema()" title="Tema: ${nombreTema()}">${iconoTema()}</button>
+    </header>
+    <main>
+      ${(clockState==="bad"||clockState==="pending") ? `<div class="banner b-off" style="background:rgba(200,140,0,0.18);color:var(--amber);border-color:var(--amber)">
+             🕐 El reloj de este móvil NO está sincronizado<br>
+             <span style="font-weight:400;font-size:0.62rem">Se ficha con la hora que marca el teléfono. Si va desajustada, las horas de paso saldrán mal y penalizarán a quien no debe. ${clockState==="pending"?"Comprobando la hora con el servidor…":"No se ha podido comprobar con el servidor. Mira la hora del móvil y ponla en automático."}</span>
+           </div>` : ''}
+      ${clockState==="warn" ? `<div class="banner b-off" style="background:rgba(200,140,0,0.13);color:var(--amber);border-color:var(--amber)">
+             🕐 El reloj va desviado ${(clockOffset/1000).toFixed(1)} s — se corrige solo en cada fichaje
+           </div>` : ''}
+      ${errorReglas ? `<div class="banner b-off" style="background:rgba(200,140,0,0.18);color:var(--amber);border-color:var(--amber)">
+             ⚠ ${errorReglas}
+           </div>` : ''}
+      ${falloAlmacen ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
+             ⛔ Este móvil no está guardando los fichajes<br>
+             <span style="font-weight:400;font-size:0.62rem">Lo fichado solo existe mientras la app siga abierta. Si la cierras o la recargas, se pierde. Avisa a la organización y no cierres esta pantalla.</span>
+           </div>` : ''}
+      ${codigoMalo() ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
+             ⛔ Código equivocado — tus fichajes NO llegan al programa<br>
+             <span style="font-weight:400;font-size:0.62rem">Estás usando <b>${setup.codigo||"—"}</b> y la carrera va con <b>${codigoServidor}</b>. Entra en <b>⚙ Cambiar control</b> y corrígelo. Lo ya fichado se subirá al sitio bueno en cuanto lo cambies.</span>
+           </div>` : ''}
+      ${anulPend ? `<div class="banner b-off" style="background:rgba(200,140,0,0.18);color:var(--amber);border-color:var(--amber)">
+             ⏳ ${anulPend===1?'Una anulación sin confirmar':anulPend+' anulaciones sin confirmar'} en el programa<br>
+             <span style="font-weight:400;font-size:0.62rem">Ese paso sigue contando en la clasificación hasta que el programa lo borre. Se reintenta solo cada 8 s; no cierres la app.</span>
+             ${errorAnular?`<br><span style="font-weight:400;font-size:0.62rem;opacity:0.85">${errorAnular}</span>`:''}
+           </div>` : ''}
+      ${!autenticado ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
+             🔒 Sin sesión con el servidor — no se pueden subir fichajes<br>
+             <span style="font-weight:400;font-size:0.62rem">${errorAuth||"Conectando…"}</span><br>
+             <span style="font-weight:400;font-size:0.62rem">Lo fichado se conserva y se subirá al recuperar la sesión.</span>
+           </div>` : ''}
+      ${ultimoError ? `<div class="banner b-off" style="background:rgba(200,30,30,0.18);color:var(--red);border-color:var(--red)">
+             ⚠ No se pudieron subir los fichajes<br>
+             <span style="font-weight:400;font-size:0.62rem;opacity:0.85">${ultimoError}</span><br>
+             <span style="font-weight:400;font-size:0.62rem">Lo fichado se conserva y se reintenta solo.</span>
+           </div>` : ''}
+      ${!online ? `<div class="banner b-off">📴 Sin conexión — fichando en local (${pend} sin subir). Se sincronizará solo al recuperar señal.</div>`
+                : pend>0 ? `<div class="banner b-off">Subiendo ${pend} fichaje(s)…</div>`
+                : codigoMalo() ? `<div class="banner b-off">Subido… pero al código equivocado (ver arriba)</div>`
+                : anulPend ? `<div class="banner b-off">Fichajes al día · falta confirmar ${anulPend===1?'una anulación':anulPend+' anulaciones'}</div>`
+                : `<div class="banner b-on">✓ En línea · todo subido</div>`}
+      ${htmlPrevistos()}
+      <div class="card">
+        <label>Dorsal ${liveRiders?'<span class="mini" style="text-transform:none;font-weight:400">(adelantados, retrasados o no previstos)</span>':''}</label>
+        <input class="dorsalIn" id="dorsalIn" inputmode="numeric" pattern="[0-9]*"
+               placeholder="—" value="${dorsalActual}"
+               oninput="dorsalActual=this.value;pistaDorsal()">
+        <div class="pista" id="pistaDorsal">${textoPista(dorsalActual)}</div>
+      </div>
+      <button class="btnPasa" id="btnPasa" onclick="onPasa()">PASA  ⏱</button>
+      <div class="row">
+        <button class="btnSec" onclick="onPasaManual()">✎ Otra hora</button>
+        <button class="btnSec" onclick="cambiarControl()">⚙ Cambiar control</button>
+      </div>
+      <div>
+        <label>Últimos fichajes</label>
+        <div class="lista" id="lista">
+          ${queue.slice(0,30).map(f=>`
+            <div class="fichaje"${f.anulado?' style="opacity:0.6"':''}>
+              <span class="d"${f.anulado?' style="text-decoration:line-through"':''}>${f.dorsal}</span>
+              <span class="hh"${f.anulado?' style="text-decoration:line-through"':''}>${fmtHora(f.horaMs).slice(0,5)}</span>
+              ${f.anulado?'<span class="pend">⏳ anulando…</span>'
+                :f.synced?(codigoMalo()?'<span class="pend">⚠ código malo</span>':'<span class="ok">✓ subido</span>')
+                :'<span class="pend">⏳ local</span>'}
+              ${f.anulado?'':`<button onclick="anular('${f.id}')" title="Anular">✕</button>`}
+            </div>`).join('') || '<div class="mini">Aún no has fichado a nadie.</div>'}
+        </div>
+        ${queue.length?`<button class="btnSec" style="width:100%;margin-top:0.5rem" onclick="exportarFichajes()">⬇ Exportar todos los fichajes de este móvil (${queue.length})</button>`:''}
+      </div>
+    </main>
+  </div>`;
+}
+
+function render(){
+  // Firebase puede llamar a render() DURANTE la carga del script (p. ej. el
+  // aviso de .info/connected, que llega al momento), antes de que existan
+  // setup, queue… Eso tiraba un error y, si pasaba dentro del bloque de
+  // arranque de Firebase, se saltaba el inicio de sesión. Hasta el arranque
+  // no se pinta nada.
+  if(!window.__chListo) return;
+  const root=document.getElementById("root");
+  // Conservar lo que el usuario está escribiendo y dónde tiene el foco
+  const activo=document.activeElement;
+  const eraDorsal=activo&&activo.id==="dorsalIn";
+  const valDorsal=eraDorsal?activo.value:null;
+  const posCursor=eraDorsal?activo.selectionStart:null;
+  // En la pantalla de configuración, lo que se está escribiendo (código, CH,
+  // nombre) no puede perderse porque llegue un dato y se repinte.
+  const camposSetup={};
+  ["s_codigo","s_ctrl","s_comisario"].forEach(id=>{const el=document.getElementById(id);if(el)camposSetup[id]=el.value;});
+  const focoSetup=activo&&camposSetup.hasOwnProperty(activo.id)?activo.id:null;
+  root.innerHTML = !setup ? pantallaSetup() : (!confirmado ? pantallaConfirmar() : (modoManual ? pantallaHoraManual() : (vistaAusentes ? pantallaAusentes() : pantallaFichar())));
+  if(eraDorsal){
+    const di=document.getElementById("dorsalIn");
+    if(di){
+      di.value=valDorsal!=null?valDorsal:dorsalActual;
+      di.focus();
+      try{di.setSelectionRange(posCursor,posCursor);}catch(e){}
+    }
+  }
+  Object.entries(camposSetup).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v;});
+  if(focoSetup){const el=document.getElementById(focoSetup);if(el){el.focus();try{const n=el.value.length;el.setSelectionRange(n,n);}catch(e){}}}
+  const di=document.getElementById("dorsalIn");
+  if(di && document.activeElement!==di){ /* mantener valor */ }
+}
+
+// Reloj en vivo en cabecera (sin re-render completo, para fluidez)
+setInterval(()=>{
+  const c=document.getElementById("liveclock");
+  if(c) c.textContent=fmtHora(horaOficialMs());
+}, 250);
+
+// --- Handlers globales ---
+let comprobandoCodigo=false;
+window.guardarSetup=async function(){
+  const g=id=>{const el=document.getElementById(id);return el?el.value.trim():"";};
+  const codigo=g("s_codigo"), ctrl=parseInt(g("s_ctrl"))||null, comisario=g("s_comisario");
+  if(!codigo){ alert("Introduce el código de acceso que te ha dado la organización."); return; }
+  if(!ctrl){ alert("Indica el número de CH."); return; }
+  if(carreraActiva&&carreraInfo&&carreraInfo.nCH&&ctrl>carreraInfo.nCH){
+    if(!confirm(`⚠ La carrera publicada («${carreraActiva}») solo tiene ${carreraInfo.nCH} CH.\n\n`+
+      `Has puesto CH${ctrl}: esos fichajes no se podrán aplicar.\n\n¿Continuar de todas formas?`)) return;
+  }
+
+  // Se comprueba el código ANTES de dejar fichar. Es el único momento en que
+  // alguien está mirando la pantalla con calma; media hora después, con motos
+  // llegando, ya no se lee nada.
+  if(!comprobandoCodigo){
+    comprobandoCodigo=true;
+    const btn=document.querySelector(".btnPasa");
+    const txt=btn?btn.textContent:"";
+    if(btn){ btn.disabled=true; btn.textContent="Comprobando el código…"; }
+    const r=await comprobarCodigo(codigo);
+    if(btn){ btn.disabled=false; btn.textContent=txt; }
+    comprobandoCodigo=false;
+    if(r.estado==="malo"){
+      const seguir=confirm(
+        "⚠ ESE CÓDIGO NO ES EL DE HOY\n\n"+
+        "Has escrito:  "+codigo+"\n"+
+        "El programa usa:  "+r.servidor+"\n\n"+
+        "Si sigues, la app dirá que todo va bien pero NINGÚN fichaje llegará al "+
+        "programa. Corrige el código o pregunta a la organización.\n\n"+
+        "¿Continuar de todas formas?");
+      if(!seguir) return;
+    }
+  }
+
+  const controlId=`ch${ctrl}`;
+  // Si cambia el código, lo ya subido está en una ruta que el programa ya no
+  // lee —da igual si el equivocado era el de antes o el de ahora—, así que se
+  // marca todo para subirlo de nuevo. No genera duplicados: el central solo
+  // escucha la ruta del código vigente.
+  const prev = setup || setupPrevio;
+  const codigoAnterior = prev && prev.codigo ? String(prev.codigo) : null;
+  if(codigoAnterior && codigoAnterior!==String(codigo) && queue.length){
+    queue.forEach(f=>{ if(!f.anulado){ f.synced=false; f.pushId=null; } });
+    save(LS_QUEUE, queue);
+  }
+  setup={ controlId, nombre:`CH${ctrl}`, ctrl, comisario, codigo, guardadoEn:Date.now() };
+  const guardado=save(LS_SETUP, setup);
+  if(!guardado) alert("⚠ Este móvil no deja guardar datos.\n\nPuedes fichar, pero si cierras o recargas la app se perderá todo lo fichado. Avisa a la organización.");
+  confirmado=true;
+  pushPresencia();
+  sincronizar();          // no esperar al reintento de 8 s tras corregir el código
+  intentarAnulaciones();
+  pedirWakeLock();
+  render();
+};
+// --- Exportar TODO lo fichado en este móvil (CSV) ---------------------------
+// La lista de la pantalla enseña solo los 30 últimos, pero el móvil guarda
+// todos y no los borra nunca. Es el testimonio del comisario: si en el
+// programa falta algo, aquí se ve qué se fichó y si llegó a subirse.
+window.exportarFichajes=async function(){
+  const p=(n)=>String(n).padStart(2,"0");
+  const fecha=(ms)=>{const d=new Date(ms);return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;};
+  const esc=(v)=>{const t=String(v==null?"":v);return /[";\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;};
+  const filas=queue.slice().sort((a,b)=>a.horaMs-b.horaMs).map(f=>[
+    fecha(f.horaMs),fmtHora(f.horaMs),f.dorsal,
+    f.anulado?(f.anulPend?"anulándose":"anulado"):f.synced?"subido":"SIN SUBIR",
+    f.ctrl||"",f.codigo||"",f.clockState||"",f.id]);
+  const csv="\ufeff"+[["Fecha","Hora","Dorsal","Estado","CH","Código","Reloj","Id"],...filas]
+    .map(f=>f.map(esc).join(";")).join("\r\n");
+  const nombre=`fichajes_CH${(setup&&setup.ctrl)||""}_${fecha(Date.now())}.csv`;
+  const blob=new Blob([csv],{type:"text/csv"});
+  // En el móvil, compartir (WhatsApp, correo…) es más útil que una descarga.
+  try{
+    const file=new File([blob],nombre,{type:"text/csv"});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:nombre});
+      return;
+    }
+  }catch(e){ if(e&&e.name==="AbortError") return; }
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=nombre;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),15000);
+  toast(`⬇ ${queue.length} fichajes exportados`);
+};
+window.onPasa=function(){
+  if(!dorsalActual.trim()){ toast("Escribe el dorsal primero"); return; }
+  fichar(dorsalActual, horaOficialMs());
+};
+window.onPasaManual=function(){
+  if(!dorsalActual.trim()){ toast("Escribe el dorsal primero"); return; }
+  // Prellenamos con la hora actual para que solo haya que corregir lo necesario
+  const d=new Date(horaOficialMs());
+  horaManual=String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0");
+  modoManual=true;
+  render();
+};
+window.teclaHora=function(t){
+  if(t==="del")horaManual=horaManual.slice(0,-1);
+  else if(t==="clr")horaManual="";          // borra la hora entera de una vez
+  else if(horaManual.length<4)horaManual+=t;
+  render();
+};
+window.cancelarHoraManual=function(){
+  modoManual=false; horaManual=""; render();
+};
+window.confirmarHoraManual=function(){
+  if(horaManual.length!==4)return;
+  const h=parseInt(horaManual.slice(0,2)), m=parseInt(horaManual.slice(2,4));
+  if(h>23||m>59){ toast("Hora no válida"); return; }
+  const now=new Date(horaOficialMs());
+  now.setHours(h,m,0,0);   // segundos a cero: en CH solo cuentan los minutos
+  modoManual=false; horaManual="";
+  fichar(dorsalActual, now.getTime());
+};
+window.confirmarControl=function(){
+  confirmado=true;
+  pushPresencia();
+  pedirWakeLock();
+  render();
+};
+window.anular=anular;
+window.cambiarControl=function(){
+  if(confirm("¿Cambiar la configuración del control? Tus fichajes locales se conservan.")){
+    // Se recuerda lo que había para volver a pintarlo en el formulario: al venir
+    // aquí a corregir un código, tener que reescribir el número de CH y el
+    // nombre es una ocasión más de equivocarse.
+    setupPrevio = setup || setupPrevio;
+    setup=null; confirmado=false; save(LS_SETUP,null); render();
+  }
+};
+
+// --- Service worker: arrancar SIN cobertura (v3.3) ---------------------------
+// Hasta la v3.2 esta app quitaba cualquier service worker, porque uno antiguo
+// servía la copia guardada ANTES que la red y el móvil se quedaba con versiones
+// viejas. Este es distinto: va PRIMERO A LA RED y solo si no hay red (o tarda
+// más de unos segundos) usa la copia guardada. Con cobertura, siempre la
+// versión publicada; sin ella, la app abre igual. Ver sw.js.
+// Se siguen quitando los de versiones muy antiguas (scope "control-horario")
+// y sus cachés "ch-…".
+if(false){
+  navigator.serviceWorker.getRegistrations().then(regs=>{
+    regs.forEach(r=>{ if(String(r.scope||"").includes("control-horario")) r.unregister(); });
+  }).catch(()=>{});
+  if(window.caches&&caches.keys){
+    caches.keys().then(ks=>ks.filter(k=>k.startsWith("ch-")).forEach(k=>caches.delete(k))).catch(()=>{});
+  }
+  if(location.protocol==="https:"||location.hostname==="localhost"||location.hostname==="127.0.0.1"){
+    navigator.serviceWorker.register("./sw.js").catch(e=>console.warn("sw",e));
+  }
+}
+
+// --- Botón de instalar (Chrome/Android dispara este evento si es instalable) ---
+window.addEventListener("beforeinstallprompt",(e)=>{
+  e.preventDefault();
+  promptInstalar=e;
+  render(); // para que aparezca el botón
+});
+window.instalarApp=async function(){
+  if(!promptInstalar){
+    alert("Si no ves la opción automática, usa el menú del navegador (⋮) → \"Añadir a pantalla de inicio\" o \"Instalar aplicación\".");
+    return;
+  }
+  promptInstalar.prompt();
+  await promptInstalar.userChoice;
+  promptInstalar=null;
+  render();
+};
+
+// --- Mantener la pantalla encendida mientras se ficha ---
+// Sin esto el móvil se apaga cada poco y el comisario pierde tiempo
+// desbloqueando justo cuando llega una moto.
+let wakeLock=null;
+async function pedirWakeLock(){
+  try{
+    if("wakeLock" in navigator){
+      wakeLock=await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release",()=>{wakeLock=null;});
+    }
+  }catch(e){ /* no soportado o denegado: no es crítico */ }
+}
+// Reintentar cuando la app vuelve a primer plano (el wake lock se pierde al salir)
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"&&!wakeLock&&setup)pedirWakeLock();
+});
+
+// --- Arranque ---
+// ¿Entiende este navegador «gap» en flex? (Chrome 84+). Si no, márgenes.
+try{
+  const d=document.createElement("div");
+  d.style.cssText="display:flex;flex-direction:column;gap:1px;position:absolute;visibility:hidden";
+  d.appendChild(document.createElement("div"));d.appendChild(document.createElement("div"));
+  document.body.appendChild(d);
+  if(d.scrollHeight!==1)document.documentElement.classList.add("sinGap");
+  d.remove();
+}catch(e){}
+window.__chListo=true;
+aplicarTema();
+initClockSync();
+escucharCarrera();
+escucharPrevistos();
+escucharCodigo();
+render();
+probarConexion();
+sincronizar();
+if(setup)pedirWakeLock();
+</script>
+</body>
+</html>
